@@ -1,5 +1,9 @@
 # dsh-reasoning-bridge
 
+[![CI](https://github.com/shangdi178/dsh-reasoning-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/shangdi178/dsh-reasoning-bridge/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-0.1.0-3B82F6)](CHANGELOG.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 DeepSeek Harness（dsh）推理桥接插件：把**高成本推理**交给网页版 AI（默认 ChatGPT 网页版，
 目标可切换），把**取证、采纳、修改、测试**全部留在 dsh 本地。基于契约化
 Context Packet / Reasoning Result 交接、版本化风险授权门和 SHA-256 运行回执，
