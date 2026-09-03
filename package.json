@@ -1,0 +1,23 @@
+{
+  "name": "dsh-reasoning-bridge",
+  "version": "0.1.0",
+  "description": "Reasoning Bridge for dsh: hand high-cost reasoning to web AI (ChatGPT first, multi-target), keep local evidence, adoption gate, edits, and tests in dsh. Contract-based Packet/Result, versioned risk consent, SHA-256 run receipts.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "reasoning",
+    "chatgpt",
+    "browser-automation",
+    "skill"
+  ],
+  "scripts": {
+    "test": "node --test \"tests/*.test.mjs\"",
+    "doctor": "node skills/reasoning-bridge/scripts/doctor.mjs --json",
+    "validate": "node skills/reasoning-bridge/scripts/validate.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

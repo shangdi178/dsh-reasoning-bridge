@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [20, 22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm test
+      - run: npm run doctor
+      - name: Validator smoke (packet/pair/complete gate)
+        shell: bash
+        run: |
+          mkdir -p .smoke/run
+          cat > .smoke/run/packet.md <<'EOF'
+          BEGIN_CONTEXT_PACKET
+          packet_id: packet-ci-001
+          requested_reasoner: ci-model
+
+          ## Objective
+          Validate the CI packet path.
+
+          ## Acceptance
+          - Validator accepts this packet.
+
+          ## Repository State
+          - CI runner, clean checkout.
+
+          ## Evidence
+          - validate.mjs handles CRLF.
+
+          ## Constraints
+          - No third-party dependencies.
+
+          ## Questions
+          1. Does the packet validate?
+          END_CONTEXT_PACKET
+          EOF
+          cat > .smoke/run/result.md <<'EOF'
+          BEGIN_REASONING_RESULT
+          packet_id: packet-ci-001
+
+          ## Verdict
+          Yes.
+
+          ## Assumptions
+          - Markers survive CRLF normalization.
+
+          ## Evidence Used
+          - validate.mjs handles CRLF.
+
+          ## Proposed Changes
+          - none.
+
+          ## Tests
+          - This smoke run.
+
+          ## Risks
+          - Selector drift in real transports.
+
+          ## Unknowns
+          - none.
+          END_REASONING_RESULT
+          EOF
+          node skills/reasoning-bridge/scripts/validate.mjs packet .smoke/run/packet.md
+          node skills/reasoning-bridge/scripts/validate.mjs pair .smoke/run/packet.md .smoke/run/result.md

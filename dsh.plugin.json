@@ -1,0 +1,13 @@
+{
+  "id": "dsh-reasoning-bridge",
+  "version": "0.1.0",
+  "main": "./lib/index.js",
+  "description": "Reasoning Bridge: 把高成本推理交给网页版 AI（ChatGPT 等，可切换多目标），dsh 保留本地取证、采纳门、修改与测试；契约化 Packet/Result + 版本化风险授权 + SHA-256 运行回执",
+  "engines": {
+    "dsh": ">=0.1.0"
+  },
+  "contributes": {
+    "tools": [],
+    "skills": ["reasoning-bridge"]
+  }
+}
