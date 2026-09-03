@@ -1,0 +1,2 @@
+# Normalize line endings: LF everywhere, let GitHub handle platform diffs in CI.
+* text=auto eol=lf

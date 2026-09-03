@@ -6,7 +6,7 @@ Run the local installation check before any browser action:
 node <skillDir>/scripts/doctor.mjs --json
 ```
 
-Continue only when it returns `READY`. Report `MISSING_RUNTIME` when Node.js 18 or newer is unavailable. Report `INVALID_INSTALLATION` with the failed check IDs when required skill files are missing or the installed package name is wrong.
+Continue only when it returns `READY` — `ready` covers installation-level checks (Node runtime, required skill files, package identity); the consent decision is reported separately as `consent_status` and must also pass before any browser action. Report `MISSING_RUNTIME` when Node.js 18 or newer is unavailable. Report `INVALID_INSTALLATION` with the failed check IDs when required skill files are missing or the installed package name is wrong.
 
 Before opening or claiming the target site, check the versioned automation decision:
 

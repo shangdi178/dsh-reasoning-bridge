@@ -13,7 +13,7 @@
     "skill"
   ],
   "scripts": {
-    "test": "node --test \"tests/*.test.mjs\"",
+    "test": "node --test tests/consent.test.mjs tests/plugin.test.mjs tests/target.test.mjs tests/validate.test.mjs",
     "doctor": "node skills/reasoning-bridge/scripts/doctor.mjs --json",
     "validate": "node skills/reasoning-bridge/scripts/validate.mjs"
   },

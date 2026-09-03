@@ -63,7 +63,7 @@ async function checkConsent() {
     return {
       id: 'consent',
       status: status.status,
-      detail: status.reason ?? `decided_at handled by consent.mjs (${defaultConsentPath()})`,
+      detail: status.reason ?? 'explicitly accepted',
     };
   } catch (error) {
     return { id: 'consent', status: 'NEEDS_AUTOMATION_CONSENT', detail: error.message };
@@ -78,8 +78,12 @@ async function main() {
     ...(await Promise.all(REQUIRED_FILES.map(checkFile))),
     await checkConsent(),
   ];
+  const consent = checks.find((check) => check.id === 'consent');
+  // ready = installation-level readiness only; the versioned consent gate is
+  // reported separately (a fresh install without a decision is still valid).
   const result = {
-    ready: checks.every((check) => check.status === 'READY'),
+    ready: checks.every((check) => check.status === 'READY' || check.id === 'consent'),
+    consent_status: consent ? consent.status : null,
     checks,
   };
   if (json) {
