@@ -4,6 +4,27 @@
   "description": "Reasoning Bridge for dsh: hand high-cost reasoning to web AI (ChatGPT first, multi-target), keep local evidence, adoption gate, edits, and tests in dsh. Contract-based Packet/Result, versioned risk consent, SHA-256 run receipts.",
   "type": "module",
   "license": "MIT",
+  "author": {
+    "name": "shangdi178",
+    "url": "https://github.com/shangdi178"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shangdi178/dsh-reasoning-bridge.git"
+  },
+  "homepage": "https://github.com/shangdi178/dsh-reasoning-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/shangdi178/dsh-reasoning-bridge/issues"
+  },
+  "files": [
+    "lib",
+    "skills",
+    "dsh.plugin.json",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "DESIGN.md"
+  ],
   "keywords": [
     "dsh",
     "deepseek-harness",
