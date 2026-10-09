@@ -46,9 +46,35 @@ ShunCode（README-only 理念仓库）对本项目的影响是取向而非代码
 - 零依赖、零构建：`lib/` + `skills/` 即产物（`dsh-versions` 先例），全部确定性逻辑
   用 node:test 覆盖
 
+## 4. 传输层 v2（0.2.0）— 从散文到可执行代码
+
+0.1.0 的传输只有 `transport-chatgpt.md` 里给 agent 照抄的 `browser_eval` 片段。
+对照真实工具面（`dsh-browser-control@0.1.0`）发现两处硬伤，片段根本跑不通：
+
+1. **每次求值都重新导航**：`browser_eval {url, expression}` 底层 `drive.mjs` 先
+   `Page.navigate` 再求值——发送后的标签页会被后续调用清掉，无法分步操作同一页面。
+2. **异步结果丢失**：`Runtime.evaluate` 未设 `awaitPromise`，文档里所有
+   `(async () => …)()` 只返回 `"Promise"` 字符串——composer 等待、流式结束检测、
+   剪贴板读取全部拿不到值。
+3. **启动器仅 macOS**：`launch.sh` 硬编码 `$HOME/Library/...`，Windows 上
+   `browser_launch` 必然失败，流程永远停在 `NEEDS_BROWSER`。
+
+0.2.0 的对策：插件自带**零依赖 CDP 驱动**（`scripts/lib/cdp.mjs`，Node ≥ 22 原生
+WebSocket），附着到 dsh 调试 Chrome 同一个 :9222 实例，一次连接内完成
+navigate → `evaluate(awaitPromise)` → 截图；页面阶段（probe/send/fetch）是
+`scripts/lib/page-chatgpt.mjs` 里可测试的表达式构建器，选择器多候选、失败映射
+`why` 码，禁触 Cookie/存储/网络由单元测试守卫。纪律不降级：仍是一次发送、
+可见等价操作、经站点自身 copy 控件 + 剪贴板取回（`Browser.grantPermissions`
+授权，失败降级为可见 DOM 文本并如实标注 `extraction: "dom"`）、不碰私有端点。
+传输驱动的角色边界：**不接管生命周期**——macOS 上仍优先 dsh `browser_launch`
+（登录态复用）；Windows 兜底 `transport.mjs launch` 用专用独立 profile 启动，
+不拷贝任何凭据文件（登录态拷贝属于 browser-control 的职责，本插件的纪律禁止
+触碰 Cookie 等凭据文件），首次在该可见窗口人工登录一次。
+
 ## 何时扩展新目标
 
-新增一个网页 AI 目标 = `scripts/target.mjs` 的 `TARGETS` 表加一行 +
-`validate.mjs` 的 `TARGET_IDS` 加一个 id + `references/transport-<id>.md`
-按适配器契约写清登录探测 / 模型校验 / 一次性发送 / 可见取回 / 阻断态 / 证据。
+新增一个网页 AI 目标 = `scripts/targets-table.mjs` 加一行（target.mjs 与
+validate.mjs 共享此表，不会漂移）+ `scripts/lib/page-<id>.mjs` 写该站点的
+选择器集与阶段表达式 + `references/transport-<id>.md` 按适配器契约写清
+登录探测 / 模型校验 / 一次性发送 / 可见取回 / 阻断态 / 证据。
 Packet、Result、采纳门、回执契约不需要任何改动。

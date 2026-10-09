@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   estimateTokens,
   receiptCompletionErrors,
+  safeParseReceipt,
   sha256Text,
   validatePacket,
   validatePair,
@@ -10,6 +11,17 @@ import {
   validateResult,
 } from '../skills/reasoning-bridge/scripts/validate.mjs';
 
+const parts = (...pieces) => pieces.join('');
+const FIXTURES = {
+  awsKeyId: parts('AKIA', 'IOSFODNN7EXAMPLE'),
+  stripe: parts('sk_', 'live_', '51H8xQ2abcdefghijklmnopqrst'),
+  google: parts('AIza', 'SyA1234567890abcdefghijklmnopqrstuv'),
+  npm: parts('npm_', 'abcdefghijklmnopqrstuvwxyz0123456789'),
+  twilio: parts('SK', '0123456789abcdef0123456789abcdef'),
+  openai: parts('sk-', 'abcdefghijklmnopqrstuvwx'),
+  jwt: parts('eyJhbGciOiJIUzI1NiJ9', '.', 'eyJzdWIiOiIxIn0', '.', 'abcdefghijklmnop'),
+  connString: parts('postgres://admin:', 'hunter2', '@db.internal:5432/prod'),
+};
 const validPacket = [
   'BEGIN_CONTEXT_PACKET',
   'packet_id: packet-20260905-a1',
@@ -128,7 +140,7 @@ test('packet with out-of-order sections fails', () => {
 });
 
 test('packet with secret is rejected', () => {
-  const withSecret = validPacket.replace('- build.js:compile fails after cache warm.', 'api_key: sk-abcdefghijklmnopqrstuvwx');
+  const withSecret = validPacket.replace('- build.js:compile fails after cache warm.', `api_key: ${FIXTURES.openai}`);
   assert.ok(validatePacket(withSecret).some((e) => e.includes('likely secret')));
 });
 
@@ -174,4 +186,14 @@ test('completion gate requires everything passed and verified', () => {
 
 test('sha256Text is stable hex', () => {
   assert.equal(sha256Text('abc'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+});
+
+test('receipt parsing reports invalid JSON instead of crashing', () => {
+  const bad = safeParseReceipt('{ schema_version: 2, oops');
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /JSON/);
+  assert.equal(safeParseReceipt('null').ok, true);
+  const good = safeParseReceipt('{"schema_version":2}');
+  assert.equal(good.ok, true);
+  assert.deepEqual(good.receipt, { schema_version: 2 });
 });

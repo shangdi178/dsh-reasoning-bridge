@@ -1,8 +1,15 @@
 {
   "name": "dsh-reasoning-bridge",
-  "version": "0.1.0",
-  "description": "Reasoning Bridge for dsh: hand high-cost reasoning to web AI (ChatGPT first, multi-target), keep local evidence, adoption gate, edits, and tests in dsh. Contract-based Packet/Result, versioned risk consent, SHA-256 run receipts.",
+  "version": "0.3.0",
+  "description": "Reasoning Bridge for dsh: hand high-cost reasoning to web AI (ChatGPT or Arena AI, multi-target), keep local evidence, adoption gate, edits, and tests in dsh. Contract-based Packet/Result, versioned risk consent, executable browser transport (zero-dependency CDP driver), SHA-256 run receipts.",
   "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./web": "./lib/web.js",
+    "./package.json": "./package.json"
+  },
   "license": "MIT",
   "author": {
     "name": "shangdi178",
@@ -19,6 +26,7 @@
   "files": [
     "lib",
     "skills",
+    "cordis.patch.yml",
     "dsh.plugin.json",
     "README.md",
     "LICENSE",
@@ -30,15 +38,30 @@
     "deepseek-harness",
     "reasoning",
     "chatgpt",
+    "arena",
     "browser-automation",
     "skill"
   ],
   "scripts": {
-    "test": "node --test tests/consent.test.mjs tests/plugin.test.mjs tests/target.test.mjs tests/validate.test.mjs",
+    "test": "node --test tests/consent.test.mjs tests/plugin.test.mjs tests/settings.test.mjs tests/target.test.mjs tests/transport.test.mjs tests/validate.test.mjs",
     "doctor": "node skills/reasoning-bridge/scripts/doctor.mjs --json",
-    "validate": "node skills/reasoning-bridge/scripts/validate.mjs"
+    "validate": "node skills/reasoning-bridge/scripts/validate.mjs",
+    "transport": "node skills/reasoning-bridge/scripts/transport.mjs"
   },
   "engines": {
     "node": ">=18"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
   }
 }

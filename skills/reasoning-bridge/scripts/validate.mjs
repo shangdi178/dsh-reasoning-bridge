@@ -8,6 +8,9 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TARGET_IDS } from './targets-table.mjs';
+
+export { TARGET_IDS };
 
 const PACKET_SECTIONS = [
   '## Objective',
@@ -38,7 +41,7 @@ const SECRET_PATTERNS = [
   /\b(?:api[_-]?key|access[_-]?token|client[_-]?secret|password)\s*[:=]\s*(?!\[REDACTED\])\S+/i,
 ];
 
-export const TARGET_IDS = new Set(['chatgpt']);
+
 const MODEL_STATUSES = new Set(['verified', 'unverified']);
 const CHECK_STATUSES = new Set(['passed', 'failed', 'not_run']);
 const LOCAL_CHANGE_STATUSES = new Set(['applied', 'no_changes_needed', 'failed', 'not_run']);
@@ -277,6 +280,15 @@ export async function verifyReceiptArtifacts(receipt, baseDirectory) {
   return errors;
 }
 
+/** Parse receipt text without throwing: { ok: true, receipt } or { ok: false, error }. */
+export function safeParseReceipt(text) {
+  try {
+    return { ok: true, receipt: JSON.parse(text) };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+}
+
 async function main() {
   const [mode, firstPath, secondPath] = process.argv.slice(2);
   if (!['packet', 'result', 'pair', 'receipt', 'complete', 'hash'].includes(mode) || !firstPath || (mode === 'pair' && !secondPath)) {
@@ -293,7 +305,16 @@ async function main() {
     return;
   }
   const result = mode === 'pair' ? await readFile(secondPath, 'utf8') : undefined;
-  const parsedReceipt = ['receipt', 'complete'].includes(mode) ? JSON.parse(text) : undefined;
+  let parsedReceipt;
+  if (['receipt', 'complete'].includes(mode)) {
+    const parsed = safeParseReceipt(text);
+    if (!parsed.ok) {
+      console.error(`ERROR: receipt is not valid JSON: ${parsed.error}`);
+      process.exitCode = 1;
+      return;
+    }
+    parsedReceipt = parsed.receipt;
+  }
   const errors = mode === 'packet'
     ? validatePacket(text)
     : mode === 'result'

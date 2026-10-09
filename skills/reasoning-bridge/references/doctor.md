@@ -32,12 +32,12 @@ node <skillDir>/scripts/consent.mjs enable --acknowledge-risk I_ACCEPT_EXPERIMEN
 
 On decline run `node <skillDir>/scripts/consent.mjs disable --json`. For `AUTOMATION_DISABLED`, do not open, claim, inspect, or control the target site.
 
-Then perform the volatile browser checks on every handoff, using dsh's own browser tools per `references/transport-<target>.md`:
+Then perform the volatile browser checks on every handoff, using the bundled transport driver per `references/transport-<target>.md` (the driver needs Node ≥ 22 — `transport.mjs` reports `why: "node-too-old"` otherwise):
 
-1. `browser_status`: if no debug Chrome is running, `browser_launch` reuses your everyday Chrome login state. If the browser tool surface itself is unavailable, return `NEEDS_BROWSER`.
-2. Open the target site (`browser_open`). If it cannot load, return `NEEDS_SITE_PERMISSION` and stop.
-3. Check visible account UI (via a read-only `browser_eval` on public page state). If logged out, return `NEEDS_LOGIN`, ask the user to take over the page and sign in, then recheck. Preserve the original task for resume.
-4. Check the user-requested model in visible UI. If unavailable or not selected, return `NEEDS_MODEL_SELECTION`; never silently substitute another model.
+1. `node <skillDir>/scripts/transport.mjs status --json`: if `running:false`, prefer dsh's `browser_launch` (reuses your everyday Chrome login state on macOS); when that tool is unavailable or fails — e.g. on Windows, where its launcher is macOS-only — run `node <skillDir>/scripts/transport.mjs launch --json`, which starts a visible Chrome/Edge with a dedicated profile that copies no credentials. If the browser cannot be started at all, return `NEEDS_BROWSER`.
+2. `node <skillDir>/scripts/transport.mjs probe --json`: opens the target site read-only. If the site cannot load, return `NEEDS_SITE_PERMISSION` and stop.
+3. If the probe reports `logged_out:true`, return `NEEDS_LOGIN`, ask the user to take over the visible page and sign in (inside the dedicated profile window on first use), then recheck. Preserve the original task for resume.
+4. Check the user-requested model in the visible UI (the probe's `model_label` is supporting evidence only). If unavailable or not selected, return `NEEDS_MODEL_SELECTION`; never silently substitute another model.
 5. Return `READY` only after authentication and model checks are visibly satisfied.
 
 Never call private endpoints or inspect cookies, local storage, session storage, hidden authentication headers, browser profiles, passwords, verification codes, or credential files. Human login is a takeover step, not an automation step.

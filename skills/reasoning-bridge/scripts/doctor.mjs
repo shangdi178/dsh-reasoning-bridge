@@ -22,18 +22,30 @@ const REQUIRED_FILES = [
   'references/run-receipt.md',
   'references/transport.md',
   'references/transport-chatgpt.md',
+  'references/transport-arena.md',
   'scripts/validate.mjs',
   'scripts/consent.mjs',
   'scripts/target.mjs',
+  'scripts/targets-table.mjs',
+  'scripts/transport.mjs',
+  'scripts/lib/cdp.mjs',
+  'scripts/lib/page-chatgpt.mjs',
+  'scripts/lib/page-arena.mjs',
 ].map((relative) => ({ id: `file:${relative}`, path: join(skillDir, relative) }));
 
 const EXPECTED_PACKAGE_NAME = 'dsh-reasoning-bridge';
 
 async function checkRuntime() {
   const major = Number.parseInt(process.versions.node.split('.')[0], 10);
-  return major >= 18
-    ? { id: 'runtime', status: 'READY', detail: `node ${process.versions.node}` }
-    : { id: 'runtime', status: 'MISSING_RUNTIME', detail: `node ${process.versions.node} is older than 18` };
+  if (major < 18) {
+    return { id: 'runtime', status: 'MISSING_RUNTIME', detail: `node ${process.versions.node} is older than 18` };
+  }
+  // Install-level scripts run on Node 18+, but the transport driver attaches
+  // to the debug browser over the native WebSocket global (Node >= 22).
+  const detail = major >= 22
+    ? `node ${process.versions.node} (transport driver ok)`
+    : `node ${process.versions.node} — install-level ok, but the transport driver needs Node >= 22`;
+  return { id: 'runtime', status: 'READY', detail };
 }
 
 async function checkFile(item) {

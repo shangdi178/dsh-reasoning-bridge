@@ -1,7 +1,10 @@
 # 发布清单（dsh-reasoning-bridge → npm / GitHub）
 
-> ⏳ **v0.1.0 发布中**（2026-09-05）：GitHub main + `v0.1.0` 标签 + Release ✅；
-> npm publish 因账号 2FA 需在本机终端完成（见 §1）。
+> ⏳ **v0.2.0 待发布**（2026-09-07）：可执行传输层已落地并通过本地验证（npm test 34 例全绿 +
+> 中立站点 launch/probe/send/fetch 真机冒烟），按 §4 流程发布。0.2.0 起 CI 矩阵为 node 22/24。
+>
+> 📌 **v0.1.0（2026-09-05）**：GitHub main + `v0.1.0` 标签 + Release ✅；
+> npm publish 因账号 2FA 一直未完成——0.2.0 发布时一并覆盖，无需补发 0.1.0。
 
 ## 0. 发布面已确认
 

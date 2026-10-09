@@ -8,12 +8,13 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TARGET_IDS, TARGETS } from './targets-table.mjs';
+import { harnessSettingsPath, parseScalarSection } from './lib/settings-bridge.mjs';
 
 const currentFile = fileURLToPath(import.meta.url);
 
-// Single source of truth for target ids; validate.mjs keeps its own copy for CLI independence.
-const TARGETS = [{ id: 'chatgpt', site: 'https://chatgpt.com/' }];
-const TARGET_IDS = new Set(TARGETS.map((t) => t.id));
+// Target ids live in targets-table.mjs (single source of truth shared with
+// validate.mjs and the transport driver).
 const STATE_SCHEMA_VERSION = 1;
 
 export function defaultStatePath(environment = process.env) {
@@ -21,20 +22,38 @@ export function defaultStatePath(environment = process.env) {
   return join(home, 'state.json');
 }
 
-export async function readState(stateFile = defaultStatePath()) {
+/**
+ * The active target, resolved in order: the dsh settings panel section
+ * (`reasoning-bridge.target` in ~/.dsh/settings.yaml — the visible GUI way to
+ * configure it), then the legacy state.json (`target.mjs set`), then the
+ * default. The settings document wins so the GUI setting is what users see.
+ */
+export async function configuredTarget(environment = process.env, stateFile = defaultStatePath(environment)) {
+  try {
+    const document = await readFile(harnessSettingsPath(environment), 'utf8');
+    const section = parseScalarSection(document, 'reasoning-bridge');
+    if (typeof section.target === 'string' && TARGET_IDS.has(section.target)) return section.target;
+  } catch { /* absent or unreadable settings document */ }
   try {
     const state = JSON.parse(await readFile(resolve(stateFile), 'utf8'));
-    if (state?.schema_version === STATE_SCHEMA_VERSION && typeof state.target === 'string') {
-      return state;
+    if (state?.schema_version === STATE_SCHEMA_VERSION && typeof state.target === 'string' && TARGET_IDS.has(state.target)) {
+      return state.target;
     }
-  } catch { /* fall through to default */ }
-  return { schema_version: STATE_SCHEMA_VERSION, target: 'chatgpt', updated_at: null };
+  } catch { /* absent or invalid state file */ }
+  return 'chatgpt';
+}
+
+export async function readState(stateFile = defaultStatePath()) {
+  return { schema_version: STATE_SCHEMA_VERSION, target: await configuredTarget(process.env, stateFile), updated_at: null };
 }
 
 export async function writeTarget(targetId, stateFile = defaultStatePath()) {
   if (!TARGET_IDS.has(targetId)) {
     throw new Error(`unknown target: ${targetId}; known: ${[...TARGET_IDS].join(', ')}`);
   }
+  // Preferred configuration surface is the dsh settings panel
+  // (reasoning-bridge.target), which we do not overwrite here. This legacy
+  // state.json entry is honored only while the settings section has no target.
   const target = resolve(stateFile);
   const state = {
     schema_version: STATE_SCHEMA_VERSION,
