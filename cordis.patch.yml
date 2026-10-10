@@ -1,0 +1,5 @@
+# DSH bundle layer: mount the existing lightweight skill plugin.
+# This adds one row; it does not replace host/browser configuration.
+- insert:
+    - id: dsh-reasoning-bridge
+      name: dsh-reasoning-bridge
