@@ -237,7 +237,16 @@ async function cmdLaunch(args) {
   const port = integerFlag(args.port ?? defaultPort(), '--port');
   const probe = await probeEndpoint(port);
   if (probe.running) {
-    return { ok: true, running: true, already_running: true, port };
+    // Point at the human step rather than a bare "already running": the usual
+    // reason to call launch is that the link does not work yet.
+    return {
+      ok: true,
+      running: true,
+      already_running: true,
+      port,
+      hint: 'the debug browser is already up; run probe to see the current state, '
+        + 'or `transport.mjs open` to bring the target site to the front for a human step',
+    };
   }
   const browser = args.browser ?? findBrowser();
   if (!browser) {
@@ -266,7 +275,29 @@ async function cmdLaunch(args) {
   for (;;) {
     const check = await probeEndpoint(port, 1500);
     if (check.running) {
-      return { ok: true, running: true, already_running: false, port, browser, profile };
+      // Bring the target site up in the window we just opened. A blank tab gave
+      // the user nothing to act on, and the next step is always a human one
+      // (sign in / clear a challenge / pick a model).
+      let opened = null;
+      try {
+        const { site, targetId } = await resolveTarget(args);
+        const { session, created } = await attachForSite(site, { port });
+        await session.bringToFront();
+        session.close();
+        opened = { site, target: targetId, created_tab: created };
+      } catch { /* best-effort: the browser is up either way */ }
+      return {
+        ok: true,
+        running: true,
+        already_running: false,
+        port,
+        browser,
+        profile,
+        ...(opened ?? {}),
+        hint: opened
+          ? `human step: sign in at ${opened.site} in the visible window (once), then run probe`
+          : 'human step: sign in at the target site in the visible window (once), then run probe',
+      };
     }
     if (Date.now() >= deadline) {
       throw new CdpError(`debug Chrome did not come up on :${port} within 30s (browser: ${browser})`, 'launch-timeout');
@@ -341,6 +372,25 @@ function decodeRequest(buffer) {
   return buffer.toString('utf8');
 }
 
+/**
+ * Pre-flight the site before transmitting. `send` used to fail with the opaque
+ * `composer-not-found` whenever the user was not signed in, which reads as "the
+ * plugin is broken" rather than "you need to log in" — the documented status is
+ * NEEDS_LOGIN. Detect it here and report the actionable reason.
+ *
+ * Best-effort and read-only: if the probe itself fails we return null and let the
+ * send attempt produce its own diagnostic rather than inventing a blocker.
+ */
+async function loginBlock(session, page, { settleMs = 8000 } = {}) {
+  try {
+    const probe = await session.evaluate(page.buildProbeExpression({ settleMs }), { timeoutMs: settleMs + 20000 });
+    if (probe?.logged_out === true) return 'logged_out';
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function cmdSend(args) {
   if (!args.file) throw new CdpError('send requires --file <request.txt>', 'usage');
   const consent = await consentBlock();
@@ -384,6 +434,20 @@ async function cmdSend(args) {
   try {
     await session.navigate(site, { settleMs: 1500 });
     await session.bringToFront();
+    // Fail with the actionable reason instead of the opaque `composer-not-found`
+    // the page phase would otherwise produce for a signed-out session.
+    const login = await loginBlock(session, page);
+    if (login !== null) {
+      return {
+        ok: false,
+        why: 'logged-out',
+        status: 'NEEDS_LOGIN',
+        detail: `not signed in at ${site}; sign in inside the visible debug window `
+          + '(`transport.mjs open` brings it to the front), then re-run send',
+        site,
+        target: targetId,
+      };
+    }
     if (page.INPUT_MODE === 'insert-text') {
       // Textarea composers: focus the control, let the driver insert text
       // through the browser input pipeline, then verify + send in the page.

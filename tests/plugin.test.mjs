@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { apply, name, splitFrontmatter } from '../lib/index.js';
 
@@ -149,21 +152,28 @@ test('the scoped injection mounts the loopback routes that the panel calls', asy
   assert.match(badTarget.payload, /chatgpt/);
   assert.match(badTarget.payload, /arena/);
 
-  // /open drives the browser, so the consent gate is evaluated before anything
-  // else — an undecided install is refused whatever the body says.
-  const blockedOpen = await call({
-    method: 'POST',
-    url: '/reasoning-bridge/open',
-    body: JSON.stringify({ target: 'chatgpt' }),
-  });
-  assert.equal(blockedOpen.status, 403);
-  assert.match(blockedOpen.payload, /consent/i);
+  // /open drives the browser, so the consent gate runs before anything else. Pin
+  // the decision to a temp home: asserting 403 against whatever this machine
+  // happens to have consented to made the test pass only on a fresh install.
+  const gateHome = await mkdtemp(join(tmpdir(), 'bridge-gate-'));
+  const previousHome = process.env.DSH_REASONING_BRIDGE_HOME;
+  process.env.DSH_REASONING_BRIDGE_HOME = gateHome;
+  try {
+    const blockedOpen = await call({
+      method: 'POST',
+      url: '/reasoning-bridge/open',
+      body: JSON.stringify({ target: 'chatgpt' }),
+    });
+    assert.equal(blockedOpen.status, 403);
+    assert.match(blockedOpen.payload, /consent/i);
 
-  // /target is a read-modify-write of local settings, not a browser action: it
-  // stays reachable while consent is undecided, and it validates the id against
-  // the shared table instead of passing free text through.
-  const blockedProbe = await call({ method: 'POST', url: '/reasoning-bridge/probe' });
-  assert.equal(blockedProbe.status, 403);
+    const blockedProbe = await call({ method: 'POST', url: '/reasoning-bridge/probe' });
+    assert.equal(blockedProbe.status, 403);
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_REASONING_BRIDGE_HOME;
+    else process.env.DSH_REASONING_BRIDGE_HOME = previousHome;
+    await rm(gateHome, { recursive: true, force: true });
+  }
 });
 
 test('the Host guard accepts the port the server is actually listening on', async () => {
