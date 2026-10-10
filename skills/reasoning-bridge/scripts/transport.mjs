@@ -130,14 +130,32 @@ function parseArgs(argv, { flags = [], values = [] } = {}) {
   return out;
 }
 
-/** Resolve the active target: explicit --site/--target wins, else state.json. */
+/**
+ * Resolve the active target: explicit --site/--target wins, else state.json.
+ *
+ * An explicit `--site` must still name a site we have an adapter for. It used to
+ * fall back to the chatgpt page module for any unknown URL, which meant
+ * `--site https://example.com/` would navigate an arbitrary site and report
+ * `target: "chatgpt"` — driving a page with selectors that were never written
+ * for it, while the report claimed a supported target.
+ */
 async function resolveTarget(options = {}) {
   if (options.site) {
     const known = TARGETS.find((entry) => entry.site === options.site);
-    const targetId = options.target ?? known?.id ?? 'chatgpt';
-    const page = PAGES[targetId];
-    if (!page) {
-      throw new CdpError(`no page module for target "${targetId}"; known targets: ${Object.keys(PAGES).join(', ')}`, 'usage');
+    const targetId = options.target ?? known?.id;
+    const page = targetId ? PAGES[targetId] : undefined;
+    if (!known || !page) {
+      throw new CdpError(
+        `--site ${options.site} is not a supported target; known sites: `
+        + TARGETS.map((entry) => entry.site).join(', '),
+        'usage',
+      );
+    }
+    if (options.target && options.target !== known.id) {
+      throw new CdpError(
+        `--site ${options.site} belongs to target "${known.id}", not "${options.target}"`,
+        'usage',
+      );
     }
     return { targetId, site: options.site, page, models: modelsFor(targetId) };
   }
@@ -207,6 +225,15 @@ async function cmdStatus(args) {
 }
 
 async function cmdLaunch(args) {
+  // Starting a debug Chrome is part of the automation path: it opens a browser
+  // that the rest of this driver will drive, and it is gated in the panel too
+  // (/launch returns 403). Refusing here keeps the CLI and the panel consistent.
+  // `status` stays ungated — it only probes a port, and it is what tells you the
+  // browser is down in the first place.
+  const consent = await consentBlock();
+  if (consent !== null) {
+    throw new CdpError(`browser automation consent is not READY (${consent})`, 'consent-not-ready');
+  }
   const port = integerFlag(args.port ?? defaultPort(), '--port');
   const probe = await probeEndpoint(port);
   if (probe.running) {
@@ -289,6 +316,31 @@ async function cmdProbe(args) {
   }
 }
 
+/**
+ * Decode a request file to text regardless of how the editor saved it. UTF-8 is
+ * the contract, but a UTF-16 file must not become a scan bypass: reading it as
+ * UTF-8 yields interleaved NULs, so the credential patterns would never match
+ * while the composer still receives the secret as mojibake.
+ */
+function decodeRequest(buffer) {
+  if (buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) return buffer.toString('utf16le').replace(/^\uFEFF/, '');
+  if (buffer.length >= 2 && buffer[0] === 0xFE && buffer[1] === 0xFF) {
+    // UTF-16BE: swap the byte pairs, then decode as little-endian.
+    const swapped = Buffer.from(buffer.subarray(2));
+    swapped.swap16();
+    return swapped.toString('utf16le');
+  }
+  // No BOM: a NUL in the first few hundred bytes is a strong UTF-16 hint.
+  const sample = buffer.subarray(0, 400);
+  if (sample.includes(0x00)) {
+    const swapped = Buffer.from(buffer);
+    if (swapped.length % 2 === 1) return swapped.toString('utf8');
+    swapped.swap16();
+    return swapped.toString('utf16le');
+  }
+  return buffer.toString('utf8');
+}
+
 async function cmdSend(args) {
   if (!args.file) throw new CdpError('send requires --file <request.txt>', 'usage');
   const consent = await consentBlock();
@@ -301,7 +353,12 @@ async function cmdSend(args) {
   await assertRuntime();
   const port = integerFlag(args.port ?? defaultPort(), '--port');
   const { site, page, targetId, models } = await resolveTarget(args);
-  const requestText = (await readFile(args.file, 'utf8')).replace(/\r\n?/g, '\n').trim();
+  const rawRequest = await readFile(args.file);
+  // Decode explicitly instead of assuming UTF-8. A UTF-16LE file read as UTF-8
+  // becomes "B\0E\0G\0I\0N\0…", which would slip past the credential scan as
+  // interleaved nulls and then be typed into the composer as mojibake. Detect the
+  // BOM / null-byte pattern and decode properly so the scan sees the real text.
+  const requestText = decodeRequest(rawRequest).replace(/\r\n?/g, '\n').trim();
   if (!requestText) throw new CdpError(`request file is empty: ${args.file}`, 'usage');
   if (!args.allowUnscanned) {
     const hits = scanBlock(requestText);

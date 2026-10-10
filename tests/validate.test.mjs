@@ -108,7 +108,7 @@ function receipt(overrides = {}) {
     local_revalidation: 'passed',
     adoption: {
       status: 'passed',
-      accepted: ['build.js:clear cache before rebuild'],
+      accepted: [{ id: 'A1', proposal: 'build.js:clear cache before rebuild', local_evidence: 'reopened build.js:compile, cache warm path confirmed' }],
       rejected: [],
       deferred: [],
       local_evidence: ['reopened build.js:compile, cache warm path confirmed'],
@@ -193,7 +193,7 @@ test('completion gate requires everything passed and verified', () => {
 
 test('completion gate refuses a self-attested empty adoption record', () => {
   // The gate used to accept `adoption.status: "passed"` with four empty arrays,
-  // which made `complete` pure self-attestation. Both halves must be recorded.
+  // which made `complete` pure self-attestation.
   const noEvidence = receipt();
   noEvidence.adoption.local_evidence = [];
   assert.ok(receiptCompletionErrors(noEvidence).some((e) => e.includes('local_evidence')));
@@ -201,6 +201,23 @@ test('completion gate refuses a self-attested empty adoption record', () => {
   const noProposals = receipt();
   noProposals.adoption.accepted = [];
   assert.ok(receiptCompletionErrors(noProposals).some((e) => e.includes('classify at least one proposal')));
+});
+
+test('completion gate requires per-proposal evidence, not one string for the record', () => {
+  // A single global `local_evidence` string used to satisfy the whole record.
+  const whitespace = receipt();
+  whitespace.adoption.local_evidence = ['   '];
+  assert.ok(receiptCompletionErrors(whitespace).some((e) => e.includes('local_evidence')));
+
+  // An accepted item with no anchor of its own is refused...
+  const bare = receipt();
+  bare.adoption.accepted = ['fix the cache'];
+  assert.ok(receiptCompletionErrors(bare).some((e) => e.includes('accepted[0]')));
+
+  // ...but the documented object form carries its anchor and passes.
+  const documented = receipt();
+  documented.adoption.accepted = [{ id: 'A1', local_evidence: 'reopened build.js:compile' }];
+  assert.deepEqual(receiptCompletionErrors(documented), []);
 });
 
 test('secret scanner catches the credential shapes the receipt gate must refuse', () => {
@@ -214,15 +231,47 @@ test('secret scanner catches the credential shapes the receipt gate must refuse'
     'https://hooks.slack.com/services/T000/B000/abcd',
     FIXTURES.google,
     FIXTURES.npm,
-    'DB_PASSWORD=hunter2',
-    'secret: hunter2',
+    FIXTURES.twilio,
+    // .env shapes, including the DB_PASS form the first regex pass missed.
+    'DB_PASS=correcthorsebatterystaple',
+    'SECRET_KEY=8f14e45fceea167a5a36dedd4bea2543',
+    // A passphrase is a bare word: the name has to carry the signal.
+    'password: hunter2hunter2',
+    `api_key: ${FIXTURES.openai}`,
+    'Cookie: session=eyJhbGciOiJIUzI1NiJ9YWJjZGVmZ2hpamts',
   ];
   for (const sample of caught) {
     assert.ok(scanForSecrets(sample).length > 0, `scanner missed: ${sample}`);
   }
-  // The scan must not fire on ordinary engineering prose.
-  assert.deepEqual(scanForSecrets('## Evidence\n- build.js:compile fails after cache warm.'), []);
-  assert.deepEqual(scanForSecrets('Token budget: keep the packet under 3000 tokens.'), []);
+});
+
+test('secret scanner does not block ordinary engineering prose and code samples', () => {
+  // A gate that fires on legitimate packets is worse than the misses it closes:
+  // it teaches operators to reach for --allow-unscanned, which defeats the point.
+  // Every one of these regressed the gate in an earlier revision.
+  const legitimate = [
+    'const token = getToken();',
+    'const apiKey = await loadApiKey();',
+    'password: the label shown in the form',
+    'The password reset flow may regress.',
+    'Review the session token refresh logic.',
+    'passwords must be at least 12 characters',
+    'token budget is 3000 tokens.',
+    'api_key=YOUR_KEY_HERE',
+    'api_key: <not set>',
+    'Authorization: <your-token-here>',
+    'Set the Authorization header from the session.',
+    'PASSWORD: changeme',
+    'access_token: [REDACTED]',
+    'reads process.env.API_KEY',
+    'Cookie: session=abc123',
+    'https://user:password@example.com/',
+    'token: opaque-handle-returned-by-server',
+    '## Evidence\n- build.js:compile fails after cache warm.',
+  ];
+  for (const sample of legitimate) {
+    assert.deepEqual(scanForSecrets(sample), [], `scanner false-positived on: ${sample}`);
+  }
 });
 
 test('sha256Text is stable hex', () => {

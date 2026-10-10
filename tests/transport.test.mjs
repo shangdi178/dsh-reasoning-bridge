@@ -230,14 +230,65 @@ test('every browser-driving subcommand respects the consent gate', async () => {
     const file = join(dir, 'request.txt');
     await writeFile(file, 'BEGIN_CONTEXT_PACKET\npacket_id: p\nEND_CONTEXT_PACKET\n', 'utf8');
     const out = join(dir, 'reply.txt');
+    // A closed port keeps these from touching a real browser even if a gate leaks.
     const closedPort = 10000 + Math.floor(Math.random() * 20000);
-    // open/probe/send/fetch all touch the site; none may run undecided.
-    assert.equal(await main(['send', '--file', file, '--json']), 1);
-    assert.equal(await main(['probe', '--json']), 1);
-    assert.equal(await main(['open', '--json']), 1);
+    // open/probe/send/fetch/launch all reach the site or start a browser for it.
+    assert.equal(await main(['send', '--file', file, '--json', '--port', String(closedPort)]), 1);
+    assert.equal(await main(['probe', '--json', '--port', String(closedPort)]), 1);
+    assert.equal(await main(['open', '--json', '--port', String(closedPort)]), 1);
     assert.equal(await main(['fetch', '--url', 'https://chatgpt.com/c/x', '--out', out, '--json']), 1);
+    assert.equal(await main(['launch', '--json', '--port', String(closedPort)]), 1);
     // status is a read-only port probe and must stay usable for diagnosis.
     assert.equal(await main(['status', '--json', '--port', String(closedPort)]), 0);
+  } finally {
+    if (previous === undefined) delete process.env.DSH_REASONING_BRIDGE_HOME;
+    else process.env.DSH_REASONING_BRIDGE_HOME = previous;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('an unsupported --site is refused instead of borrowing another target module', async () => {
+  // Regression: resolveTarget fell back to the chatgpt page module for any URL,
+  // so `--site https://example.com/` navigated an arbitrary site while reporting
+  // target "chatgpt" — driving a page whose selectors were never written for it.
+  const dir = await mkdtemp(join(tmpdir(), 'bridge-site-'));
+  const previous = process.env.DSH_REASONING_BRIDGE_HOME;
+  process.env.DSH_REASONING_BRIDGE_HOME = dir;
+  try {
+    // Consent is READY, so the only thing under test is the site resolution.
+    await writeConsentDecision(join(dir, 'consent.json'), true);
+    const closedPort = 10000 + Math.floor(Math.random() * 20000);
+    assert.equal(await main(['open', '--json', '--site', 'https://example.com/', '--port', String(closedPort)]), 2);
+    // A site that belongs to another target may not be paired with --target.
+    assert.equal(await main(['open', '--json', '--site', 'https://chatgpt.com/', '--target', 'arena', '--port', String(closedPort)]), 2);
+  } finally {
+    if (previous === undefined) delete process.env.DSH_REASONING_BRIDGE_HOME;
+    else process.env.DSH_REASONING_BRIDGE_HOME = previous;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a UTF-16 request file cannot smuggle a secret past the scan', async () => {
+  // Reading a UTF-16 file as UTF-8 yields interleaved NULs, so the patterns never
+  // match while the composer still receives the secret as mojibake. The driver now
+  // decodes the file properly before scanning.
+  const dir = await mkdtemp(join(tmpdir(), 'bridge-u16-'));
+  const previous = process.env.DSH_REASONING_BRIDGE_HOME;
+  process.env.DSH_REASONING_BRIDGE_HOME = dir;
+  try {
+    await writeConsentDecision(join(dir, 'consent.json'), true);
+    const text = `BEGIN_CONTEXT_PACKET\npacket_id: p\n- ${STRIPE_FIXTURE}\nEND_CONTEXT_PACKET\n`;
+    const file = join(dir, 'request.txt');
+    await writeFile(file, Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(text, 'utf16le')]));
+    const logged = [];
+    const originalError = console.error;
+    console.error = (...args) => logged.push(args.join(' '));
+    try {
+      assert.equal(await main(['send', '--file', file, '--json']), 1);
+    } finally {
+      console.error = originalError;
+    }
+    assert.ok(logged.some((line) => line.includes('credential scan')), logged.join('\n'));
   } finally {
     if (previous === undefined) delete process.env.DSH_REASONING_BRIDGE_HOME;
     else process.env.DSH_REASONING_BRIDGE_HOME = previous;

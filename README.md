@@ -31,10 +31,12 @@ $reasoning-bridge 诊断这个复杂 Bug，完成修复并在本地验证。
 
 | 声明 | 性质 | 落点 |
 | --- | --- | --- |
-| **发送前拒绝未授权**：consent 非 `READY` 时 `open`/`probe`/`send`/`fetch` 直接失败 | ✅ 代码机制 | `transport.mjs` 的 `consentBlock()`、`lib/web.js` 的 `BROWSER_ROUTES` 守卫（`status` 只探端口，保持可用以便诊断） |
+| **发送前拒绝未授权**：consent 非 `READY` 时 `open`/`probe`/`send`/`fetch`/`launch` 直接失败 | ✅ 代码机制 | `transport.mjs` 的 `consentBlock()`、`lib/web.js` 的 `BROWSER_ROUTES` 守卫（`status` 只探端口，保持可用以便诊断） |
+| **只接受已支持目标**：`--site` 必须是 `chatgpt`/`arena` 的站点之一，且 `--target` 必须与之匹配 | ✅ 代码机制 | `transport.mjs` 的 `resolveTarget()`（未知站点报 `usage` 错误，不再借用其他目标的页面模块） |
 | **发送前拒绝疑似凭据**：request 文件命中凭据形状即拒发（`--allow-unscanned` 显式放行） | ✅ 代码机制 | `validate.mjs` 的 `scanForSecrets()` + `transport.mjs` 的 `scanBlock()` |
 | **`complete` 闸门复扫产物**：不只信 `privacy_review.*` 自述布尔，重新扫描 packet/result/evidence 内容 | ✅ 代码机制 | `validate.mjs` 的 `verifyReceiptArtifacts()` |
-| **`complete` 闸门要求旁证**：`adoption` 必须有至少一条已分类提案 + 至少一条本地证据 | ✅ 代码机制 | `validate.mjs` 的 `receiptCompletionErrors()` |
+| **`complete` 闸门要求旁证**：`adoption` 须有至少一条已分类提案、至少一条本地证据，且**每个 accepted 项各带自己的 anchor** | ✅ 代码机制 | `validate.mjs` 的 `receiptCompletionErrors()` |
+| **拒绝编码绕过**：UTF-16 等非 UTF-8 的 request 文件先解码再扫描，不会以乱码形式绕过 | ✅ 代码机制 | `transport.mjs` 的 `decodeRequest()` |
 | **不读 Cookie / 存储 / 隐藏凭据**：页面表达式禁触这些 API | ✅ 代码机制（测试守卫） | `page-*.mjs` + `tests/transport.test.mjs` 的 `FORBIDDEN_PAGE_APIS` |
 | **回环 + Host + Origin 校验**：面板路由只允许本机同源访问 | ✅ 代码机制 | `lib/web.js` |
 | **一次发送、不重试**：传输层无重试循环 | ✅ 代码机制 | `transport.mjs` |
@@ -44,13 +46,20 @@ $reasoning-bridge 诊断这个复杂 Bug，完成修复并在本地验证。
 | **模型身份可信**：`verified` 依赖可见 UI 的人工确认与本地证据 | ⚠️ 纪律约定 | `references/transport-chatgpt.md` §3 |
 
 凭据扫描是**形状启发式**：覆盖 PEM/PGP 私钥、AWS、GitHub/GitLab、Slack/Discord webhook、
-OpenAI/Stripe/Google/npm/HF/Azure 令牌、JWT、带密码的连接串、`Authorization`/`Cookie` 头、
-`.env` 形式的赋值等常见形态，但**无法理解业务秘密**——放行只代表「没命中已知形状」。
+OpenAI/Stripe/Google/npm/HF/Azure/Twilio 令牌、JWT、带密码的连接串、`Authorization`/`Cookie` 头、
+`.env` 与 `KEY: value` 形式的赋值等常见形态，但**无法理解业务秘密**——放行只代表「没命中已知形状」。
 
-它**抓不到**的东西（实测）：被拆行或插空格的密钥、base64/hex 编码后的密钥、
-被截断的 JWT、纯高熵字符串、内网主机名与私有 IP、个人数据（邮箱/电话/身份证）、
-以及任何不在上述形状里但同样敏感的**业务语义秘密**。这些只能靠语义隐私审查拦住，
-而语义审查是纪律不是机制——所以「扫描通过」永远不等于「可以发」。
+赋值类规则会**检查右侧的值是否真的像密钥材料**（长度、字符多样性、排除占位符与代码表达式），
+因此 `const token = getToken();`、`api_key=YOUR_KEY_HERE`、`Authorization: <your-token-here>`、
+`password: 表单上的标签` 这类正常的代码与散文**不会**误报；同时 `DB_PASS=correcthorsebatterystaple`
+这类「命名即密码」的赋值连纯单词口令也会命中。这一条是修出来的：早期版本对任意右侧都开火，
+把合法 Packet 一并拦下，反而会训练使用者去按 `--allow-unscanned`——比它想堵的漏洞更糟。
+
+它**仍然抓不到**的东西（实测）：被拆行或插空格的密钥、base64/hex 编码后的密钥、
+被截断的 JWT、纯高熵但无命名线索的字符串、内网主机名与私有 IP、个人数据（邮箱/电话/身份证）、
+以及「口令出现在散文里」（如 `the staging password is hunter2`，句中无赋值形式）这类
+**业务语义秘密**。这些只能靠语义隐私审查拦住，而语义审查是纪律不是机制——
+所以「扫描通过」永远不等于「可以发」。
 
 ## 功能
 

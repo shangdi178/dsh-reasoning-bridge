@@ -42,10 +42,10 @@ The receipt is redacted metadata. It may contain artifact paths, hashes, sizes, 
   "local_revalidation": "passed|failed|not_run",
   "adoption": {
     "status": "passed|failed|not_run",
-    "accepted": [],
-    "rejected": [],
-    "deferred": [],
-    "local_evidence": []
+    "accepted": [{"id": "<short id>", "proposal": "<what the web AI suggested>", "local_evidence": "<file:symbol you reopened>"}],
+    "rejected": [{"id": "<short id>", "proposal": "<...>", "reason": "<local evidence that contradicts it>"}],
+    "deferred": [{"id": "<short id>", "proposal": "<...>", "reason": "<what authority or input is needed>"}],
+    "local_evidence": ["<every anchor you reopened, as file:symbol>"]
   },
   "local_changes": {
     "status": "applied|no_changes_needed|failed|not_run",
@@ -62,4 +62,8 @@ node <skillDir>/scripts/validate.mjs receipt /path/to/receipt.json
 node <skillDir>/scripts/validate.mjs complete /path/to/receipt.json
 ```
 
-`verified` requires a non-empty observed model and local evidence. Web completion also requires preflight and postflight model visibility. The `complete` gate requires both models verified, every privacy field true, browser transport verified, adoption passed, local changes resolved, every local check passed, and recomputed artifact hashes matching the receipt. Run it from the run directory so relative artifact paths resolve. Store receipts under `~/.dsh/dsh-reasoning-bridge/runs/<packet_id>/` (or the run directory you created there). SHA-256 binds the local artifacts for reproducibility; it is not remote model attestation.
+`verified` requires a non-empty observed model and local evidence. Web completion also requires preflight and postflight model visibility. The `complete` gate requires both models verified, every privacy field true, browser transport verified, adoption passed, local changes resolved, every local check passed, and recomputed artifact hashes matching the receipt — and it **re-runs the credential scan on each artifact it hashes**, so a self-declared `credentials_scan_passed` is not enough. The adoption record must classify at least one proposal, record at least one local anchor, and give **every accepted item its own `local_evidence`**; one global string no longer satisfies the whole record.
+
+What the gate still cannot do: confirm that an anchor names a real file or symbol, or that you actually reopened it. It checks that the record is *shaped* like honest work, not that the work happened.
+
+Run it from the run directory so relative artifact paths resolve. Store receipts under `~/.dsh/dsh-reasoning-bridge/runs/<packet_id>/` (or the run directory you created there) — never inside the repository. SHA-256 binds the local artifacts for reproducibility; it is not remote model attestation.

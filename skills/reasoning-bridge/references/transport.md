@@ -63,8 +63,12 @@ Every `transport-<id>.md` must specify:
 
 ## Shipped adapters
 
-Only these two targets exist. Nothing else is implemented, listed, or selectable — a
-request for another web AI has no adapter and must be refused rather than approximated.
+Only these two targets exist. Nothing else is implemented, listed, or selectable —
+and that is enforced, not just asserted: `--site <url>` must name one of the two
+sites below (`resolveTarget` refuses anything else with a `usage` error), and
+`--target` must match the site it is paired with. A request for another web AI has
+no adapter and is refused rather than approximated by reusing another site's
+selectors.
 
 - `transport-chatgpt.md` — `https://chatgpt.com/` web UI (default target; model is selectable and verifiable).
 - `transport-arena.md` — `https://arena.ai/` (Arena AI leaderboard UI; **Battle Mode answers come from two anonymous models, so model identity is unverifiable** — the receipt must record `unverified`, and the fetch returns both answers).

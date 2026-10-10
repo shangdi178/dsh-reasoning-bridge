@@ -33,16 +33,90 @@ const RESULT_SECTIONS = [
 
 /**
  * Credential-shape heuristics. These are a necessary-but-insufficient barrier:
- * they catch well-known shapes and obvious `key: value` assignments, they cannot
- * understand business secrets. The semantic privacy review in SKILL.md stays
- * mandatory, and `send` refuses to run until this scan is clean.
+ * they catch well-known shapes and `key: value` assignments whose value actually
+ * looks like key material. They cannot understand business secrets: a clean scan
+ * means "no known shape matched", never "safe to send". The semantic privacy
+ * review in SKILL.md stays mandatory, and `send` refuses to run until this scan
+ * is clean.
+ *
+ * Design note (learned the hard way): an early version matched *any* non-space
+ * right-hand side, which made ordinary packets fail — `const token = getToken();`,
+ * `password: the label shown in the form`, `api_key=YOUR_KEY_HERE`,
+ * `Authorization: <your-token-here>`. A gate that blocks legitimate runs is worse
+ * than the misses it closes, because it teaches operators to pass the override.
+ * So the generic rules now require the value to LOOK like key material:
+ *   - at least 12 characters of a credential-ish alphabet, and
+ *   - enough character diversity (not a single word), and
+ *   - not a placeholder / substitution / prose phrase.
  */
+
+/**
+ * A value that plausibly IS key material: long enough, mixed enough, and not a
+ * single dictionary-ish word. Deliberately conservative — the cost of a false
+ * negative is the semantic review, the cost of a false positive is a dead gate.
+ */
+const SECRET_VALUE = String.raw`(?![^\s]*(?:\.\.\.|…))(?=[^\s]*[A-Za-z])(?=[^\s]*[0-9A-Za-z_\-+/=]{12,})[^\s]{12,}`;
+
+/**
+ * Values that are obviously NOT secrets: replacement placeholders, env-var
+ * substitutions, redaction markers, descriptions, and code expressions.
+ * Checked against the captured value rather than embedded as lookahead soup so
+ * the rules stay readable and testable.
+ */
+const PLACEHOLDER_VALUE = /^(?:<(?:[^>]*)>|\[(?:REDACTED|redacted|…|\.\.\.)\]|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\{\{?[^}]*\}?\}|x{4,}|\*{4,}|\.{3,}|…|YOUR[_-].*|MY[_-].*|CHANGE[_-]?ME|changeme|example|placeholder|dummy|sample|test|none|null|nil|undefined|true|false|n\/a|<not set>)$/i;
+
+/**
+ * A value that is a code expression rather than a literal secret: a function
+ * call (`getToken()`), an awaited call (`await loadApiKey()`), or a dotted member
+ * reference (`config.auth.token`). Deliberately does NOT match a bare identifier
+ * — `hunter2hunter2` and `correcthorsebatterystaple` are bare words that are
+ * exactly the passphrases this filter must still catch.
+ */
+const CODE_EXPRESSION = /^(?:await\s+)?[A-Za-z_$][A-Za-z0-9_$]*(?:\([^)]*\)|(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+\(?[^)]*\)?)[;,]?$/;
+
+/**
+ * True when a captured right-hand side looks like an actual secret value.
+ *
+ * `passphraseLike` relaxes the character-diversity requirement for assignments
+ * whose *name* is explicitly a password/passphrase: `DB_PASS=correcthorsebattery`
+ * is a real secret that no amount of entropy checking will recognize, so the name
+ * has to carry the signal there. Everything else must look like key material.
+ */
+function looksLikeSecretValue(value, { passphraseLike = false } = {}) {
+  const raw = String(value ?? '').trim().replace(/^["'`]|["'`,;]+$/g, '');
+  if (raw.length < 12) return false;
+  if (PLACEHOLDER_VALUE.test(raw)) return false;
+  if (CODE_EXPRESSION.test(raw)) return false; // `getToken()` / `await loadApiKey()`
+  // Prose: several space-separated words with no credential-ish punctuation.
+  if (/^[a-z]+(?:[ -][a-z]+){1,6}[.;]?$/.test(raw)) return false;
+  const classes = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((re) => re.test(raw)).length;
+  if (passphraseLike) return classes >= 1; // a long word is a plausible passphrase
+  // Otherwise require either mixed character classes or a long random-looking run,
+  // which keeps bare prose words out while still catching high-entropy strings.
+  if (classes >= 2) return true;
+  return /[0-9]/.test(raw) || raw.length >= 24;
+}
+
+/** Credential-assignment rules, matched on shape then filtered by value.
+ *  Group 1 = the credential NAME (decides the passphrase relaxation),
+ *  group 2 = the candidate VALUE. */
+const ASSIGNMENT_PATTERNS = [
+  // `api_key: <value>` / `DB_PASS=<value>` / `client_secret = <value>`.
+  /\b(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret[_-]?key|private[_-]?key|app[_-]?secret|signing[_-]?key|encryption[_-]?key|password|passwd|passphrase|pwd|secret|token|credential)s?\s*[:=]\s*["']?([^\s"']{12,})/gi,
+  // .env-style SCREAMING_CASE whose name ends in a secret noun (covers DB_PASS=,
+  // which has no lowercase `password`/`passwd`/`pwd` in it).
+  /^\s*([A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASS(?:WORD|WD|PHRASE)?|CREDENTIAL|AUTH)S?)\s*=\s*["']?([^\s"']{12,})/gm,
+];
+
+/** Names that carry a password/passphrase, where a bare long word is a secret. */
+const PASSPHRASE_NAME = /pass(?:word|wd|phrase)?|pwd/i;
+
 const SECRET_PATTERNS = [
   // Private key blocks (including PGP / OpenSSH / PKCS#8 variants).
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----/i,
   // AWS access key id, and the standalone 40-char secret access key.
   /\b(?:AKIA|ASIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA)[0-9A-Z]{16}\b/,
-  /aws_secret_access_key\s*[:=]\s*(?!\[REDACTED\])\S+/i,
+  /\baws_secret_access_key\s*[:=]\s*(?!\[REDACTED\])\S{16,}/i,
   // VCS / CI / chat / infra tokens.
   /\bgh[pousr]_[A-Za-z0-9]{20,}\b/,
   /\bgithub_pat_[A-Za-z0-9_]{20,}\b/,
@@ -53,24 +127,29 @@ const SECRET_PATTERNS = [
   /\bsk-(?:live|test|proj|ant|or)?-?[A-Za-z0-9_-]{20,}\b/,
   // Stripe-style `sk_live_…` / `rk_test_…` (underscore separators).
   /\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}\b/,
+  // Twilio-style account SID + auth token.
+  /\bSK[0-9a-fA-F]{32}\b/,
   // Google / Azure / generic cloud keys.
   /\bAIza[0-9A-Za-z_-]{35}\b/,
   /\bAccountKey\s*=\s*(?!\[REDACTED\])[A-Za-z0-9+/=]{20,}/i,
   /\b(?:LTAI|AKID)[A-Za-z0-9]{12,}\b/,
   // JWTs (three base64url segments) — caught even when embedded in a header.
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
-  // Connection strings that embed a password.
-  /\b[a-z][a-z0-9+.-]{2,}:\/\/[^\s:@/]+:[^\s:@/]{3,}@/i,
-  // Authorization / cookie headers and webhook URLs.
-  /\bAuthorization\s*:\s*(?!\[REDACTED\])\S+/i,
-  /\b(?:Cookie|Set-Cookie)\s*:\s*(?!\[REDACTED\])\S+/i,
+  // Connection strings that embed a password (skip documentation placeholders).
+  /\b[a-z][a-z0-9+.-]{2,}:\/\/[^\s:@/]+:(?!password\b|passwd\b|pass\b|\*{3,}|<[^>]*>|\.\.\.)[^\s:@/]{3,}@/i,
   /https:\/\/hooks\.slack\.com\/services\/\S+/i,
   /https:\/\/(?:discord|discordapp)\.com\/api\/webhooks\/\S+/i,
-  // Generic `key: value` / `key = value` credential assignments, including the
-  // .env shapes the earlier list missed (bare secret/token/passwd, DB_PASS...).
-  /\b(?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?key|private[_-]?key|password|passwd|pwd|secret|token|credential)s?\s*[:=]\s*(?!\[REDACTED\])\S+/i,
-  // .env-style SCREAMING_CASE assignments whose name ends in a secret noun.
-  /^\s*[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|CREDENTIAL)S?\s*=\s*(?!\[REDACTED\])\S+/m,
+];
+
+/**
+ * Header-shaped rules. `Authorization`/`Cookie` are extremely common in code
+ * samples and API docs, so these also require a credential-looking value rather
+ * than any non-space run — otherwise `Authorization: <your-token-here>` blocks a
+ * perfectly legitimate packet.
+ */
+const HEADER_PATTERNS = [
+  /\bAuthorization\s*:\s*(?:Bearer\s+|Basic\s+|Token\s+)?["']?(?!\[REDACTED\])([^\s"']{12,})/gi,
+  /\b(?:Cookie|Set-Cookie)\s*:\s*["']?(?!\[REDACTED\])([^\s"']{12,})/gi,
 ];
 
 
@@ -95,12 +174,41 @@ export function estimateTokens(text) {
  * Credential-shape scan, exported so the transport driver can enforce it on the
  * send path instead of trusting a separately-run CLI step.
  * Returns the list of matched shapes (empty = clean); never throws.
+ *
+ * Two passes: fixed well-known token shapes, then credential assignments whose
+ * right-hand side actually looks like key material (see `looksLikeSecretValue`).
  */
 export function scanForSecrets(text) {
   const haystack = typeof text === 'string' ? text : '';
-  return SECRET_PATTERNS
-    .map((pattern, index) => (pattern.test(haystack) ? `secret-pattern-${index + 1}` : null))
-    .filter(Boolean);
+  const hits = [];
+  SECRET_PATTERNS.forEach((pattern, index) => {
+    // Fresh lastIndex per call: these carry /g or are reused across invocations.
+    pattern.lastIndex = 0;
+    if (pattern.test(haystack)) hits.push(`secret-pattern-${index + 1}`);
+  });
+  const assignmentHit = ASSIGNMENT_PATTERNS.some((pattern) => {
+    pattern.lastIndex = 0;
+    for (const match of haystack.matchAll(pattern)) {
+      if (looksLikeSecretValue(match[2], { passphraseLike: PASSPHRASE_NAME.test(match[1] ?? '') })) return true;
+    }
+    return false;
+  });
+  if (assignmentHit) hits.push('credential-assignment');
+  const headerHit = HEADER_PATTERNS.some((pattern) => {
+    pattern.lastIndex = 0;
+    for (const match of haystack.matchAll(pattern)) {
+      const value = String(match[1] ?? '');
+      // `Cookie: session=abc123` is as likely a code sample as a live session, so
+      // headers additionally require a high-entropy-looking value. Real session
+      // cookies are long opaque strings; `abc123` is not.
+      if (looksLikeSecretValue(value) && /[A-Za-z0-9+/=_-]{16,}/.test(value) && !/^[a-z]+=[a-z0-9]{1,12}$/i.test(value)) {
+        return true;
+      }
+    }
+    return false;
+  });
+  if (headerHit) hits.push('credential-header');
+  return hits;
 }
 
 export function sha256Text(text) {
@@ -300,18 +408,33 @@ export function receiptCompletionErrors(receipt) {
     if (receipt[field] !== 'passed') errors.push(`${field} is not passed`);
   }
   if (receipt.adoption.status !== 'passed') errors.push('adoption is not passed');
-  // The gate must not accept a bare `status: "passed"`: a run that accepted
-  // nothing still has to say why, and every accepted proposal needs the local
-  // evidence that justified it. Otherwise `complete` is pure self-attestation.
-  if (!receipt.adoption.local_evidence.length) {
-    errors.push('adoption.local_evidence must record at least one locally reopened anchor');
-  }
+  // The gate must not accept a bare `status: "passed"`. Checks, in order of what
+  // they actually buy you:
+  //   - at least one proposal classified (a run that decided nothing is not a run)
+  //   - at least one local anchor recorded (evidence exists at all)
+  //   - every ACCEPTED item carries its own anchor (evidence is per-proposal, not
+  //     one global string satisfying the whole record). A bare string is a
+  //     proposal with no evidence attached, so the object form is required.
+  // What this still cannot do: verify the anchor is real, that the file/symbol
+  // exists, or that the agent actually opened it. A determined author can write
+  // plausible strings. The record proves intent to comply, not compliance.
+  const anchor = (item) => (Array.isArray(item?.local_evidence)
+    ? item.local_evidence.some((entry) => String(entry ?? '').trim())
+    : typeof item?.local_evidence === 'string' ? item.local_evidence.trim() : '');
   const classified = receipt.adoption.accepted.length
     + receipt.adoption.rejected.length
     + receipt.adoption.deferred.length;
   if (!classified) {
     errors.push('adoption must classify at least one proposal (accepted, rejected or deferred)');
   }
+  if (!receipt.adoption.local_evidence.some((item) => String(item ?? '').trim())) {
+    errors.push('adoption.local_evidence must record at least one locally reopened anchor');
+  }
+  receipt.adoption.accepted.forEach((item, index) => {
+    if (!anchor(item)) {
+      errors.push(`adoption.accepted[${index}] must carry its own local_evidence anchor`);
+    }
+  });
   if (!['applied', 'no_changes_needed'].includes(receipt.local_changes.status)) {
     errors.push('local_changes is not complete');
   }
