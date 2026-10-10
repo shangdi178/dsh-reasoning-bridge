@@ -3,7 +3,7 @@
   "version": "0.4.0",
   "description": "Reasoning Bridge for dsh: hand high-cost reasoning to web AI (ChatGPT or Arena AI, multi-target), keep local evidence, adoption gate, edits, and tests in dsh. Contract-based Packet/Result, versioned risk consent, executable browser transport (zero-dependency CDP driver), SHA-256 run receipts.",
   "type": "module",
-  "main": "lib/index.js",
+  "main": "./lib/index.js",
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
@@ -43,7 +43,7 @@
     "skill"
   ],
   "scripts": {
-    "test": "node --test tests/consent.test.mjs tests/plugin.test.mjs tests/settings.test.mjs tests/target.test.mjs tests/transport.test.mjs tests/validate.test.mjs",
+    "test": "node --test tests/bundle.test.mjs tests/consent.test.mjs tests/plugin.test.mjs tests/settings.test.mjs tests/target.test.mjs tests/transport.test.mjs tests/validate.test.mjs",
     "doctor": "node skills/reasoning-bridge/scripts/doctor.mjs --json",
     "validate": "node skills/reasoning-bridge/scripts/validate.mjs",
     "transport": "node skills/reasoning-bridge/scripts/transport.mjs"
