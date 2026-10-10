@@ -9,11 +9,13 @@ mechanisms and rewrites the rest so the docs describe what actually happens.
 
 **Turned into enforced code**
 
-- **Consent is now a gate, not a suggestion.** `transport.mjs open|probe|send`
+- **Consent is now a gate, not a suggestion.** `transport.mjs open|probe|send|fetch`
   read the versioned decision and fail with `why: "consent-not-ready"` unless it
   is `READY`; the panel's `/open`, `/launch`, `/probe` routes return 403.
   Previously `transport.mjs` never imported `consent.mjs`, so a disabled install
-  was still one command away from driving the browser.
+  was still one command away from driving the browser. `status` deliberately
+  stays usable (it only probes the debug port) so the link can be diagnosed
+  while the decision is pending.
 - **`send` refuses credential-shaped request files.** The scanner is now wired
   into the send path (`why: "secret-scan-failed"`) instead of being a separate
   CLI step an agent had to remember; `--allow-unscanned` is the deliberate

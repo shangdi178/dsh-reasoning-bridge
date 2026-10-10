@@ -354,12 +354,20 @@ async function cmdSend(args) {
 
 async function cmdFetch(args) {
   if (!args.url || !args.out) throw new CdpError('fetch requires --url <conversation-url> and --out <reply.txt>', 'usage');
+  // Validate arguments (exit 2, a usage error) before the consent gate (exit 1),
+  // so a malformed invocation is still diagnosed as malformed.
   let fetchUrl;
   try {
     fetchUrl = new URL(args.url);
     if (fetchUrl.protocol !== 'https:') throw new Error('https only');
   } catch {
     throw new CdpError(`--url must be an https conversation URL, got ${JSON.stringify(args.url)}`, 'usage');
+  }
+  // fetch drives a page and writes untrusted content to disk, so it respects the
+  // same consent gate as the other browser actions.
+  const consent = await consentBlock();
+  if (consent !== null) {
+    throw new CdpError(`browser automation consent is not READY (${consent})`, 'consent-not-ready');
   }
   await assertRuntime();
   const port = integerFlag(args.port ?? defaultPort(), '--port');

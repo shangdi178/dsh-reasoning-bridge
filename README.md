@@ -31,7 +31,7 @@ $reasoning-bridge 诊断这个复杂 Bug，完成修复并在本地验证。
 
 | 声明 | 性质 | 落点 |
 | --- | --- | --- |
-| **发送前拒绝未授权**：consent 非 `READY` 时 `open`/`probe`/`send` 直接失败 | ✅ 代码机制 | `transport.mjs` 的 `consentBlock()`、`lib/web.js` 的 `BROWSER_ROUTES` 守卫 |
+| **发送前拒绝未授权**：consent 非 `READY` 时 `open`/`probe`/`send`/`fetch` 直接失败 | ✅ 代码机制 | `transport.mjs` 的 `consentBlock()`、`lib/web.js` 的 `BROWSER_ROUTES` 守卫（`status` 只探端口，保持可用以便诊断） |
 | **发送前拒绝疑似凭据**：request 文件命中凭据形状即拒发（`--allow-unscanned` 显式放行） | ✅ 代码机制 | `validate.mjs` 的 `scanForSecrets()` + `transport.mjs` 的 `scanBlock()` |
 | **`complete` 闸门复扫产物**：不只信 `privacy_review.*` 自述布尔，重新扫描 packet/result/evidence 内容 | ✅ 代码机制 | `validate.mjs` 的 `verifyReceiptArtifacts()` |
 | **`complete` 闸门要求旁证**：`adoption` 必须有至少一条已分类提案 + 至少一条本地证据 | ✅ 代码机制 | `validate.mjs` 的 `receiptCompletionErrors()` |

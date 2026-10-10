@@ -25,7 +25,7 @@ The web phases are **executable code**, not prose snippets. `scripts/transport.m
 
 Driver facts an adapter author must know:
 
-- **Two gates run before any browser action.** `open`, `probe` and `send` first read the versioned consent decision and fail with `why: "consent-not-ready"` unless it is `READY`; `send` additionally scans the request file and fails with `why: "secret-scan-failed"` on a credential shape (`--allow-unscanned` is the deliberate override). Both are code, not prose — an adapter must document them as stop conditions.
+- **Two gates run before any browser action.** `open`, `probe`, `send` and `fetch` first read the versioned consent decision and fail with `why: "consent-not-ready"` unless it is `READY`; `send` additionally scans the request file and fails with `why: "secret-scan-failed"` on a credential shape (`--allow-unscanned` is the deliberate override). `status` stays usable so the link can be diagnosed while undecided. Both gates are code, not prose — an adapter must document them as stop conditions.
 - The driver attaches to a tab and evaluates with `awaitPromise`, so page-side waits (composer appears, stream settles, clipboard read) resolve as values — this is why it exists: dsh's `browser_eval` re-navigates on every call and drops async results.
 - `send` always opens a **fresh tab** on the site (never pastes into a conversation the user left open).
 - The site's own copy affordance + clipboard read is attempted first; `Browser.grantPermissions` is granted driver-side; on failure the fetch falls back to the visible DOM text of the last assistant message and reports `extraction: "dom"`.

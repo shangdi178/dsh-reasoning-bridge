@@ -39,7 +39,7 @@ Delegation rules:
 
    On `NEEDS_AUTOMATION_CONSENT`, show the exact disclosure from the Doctor reference without softening it and ask one explicit question (use the ask-user-question tool). Run `enable --acknowledge-risk I_ACCEPT_EXPERIMENTAL_WEB_AI_AUTOMATION_RISK_V1 --json` only after an affirmative response in the current conversation. On decline, run `disable --json`. On `AUTOMATION_DISABLED`, perform no browser action toward the target and continue only with local work.
 
-   This gate is enforced in code, not just here: while the decision is not `READY`, `transport.mjs open|probe|send` fail with `why: "consent-not-ready"` and the panel's open/launch/probe routes return 403. Do not work around it — the decision is the user's to make.
+   This gate is enforced in code, not just here: while the decision is not `READY`, `transport.mjs open|probe|send|fetch` fail with `why: "consent-not-ready"` and the panel's open/launch/probe routes return 403. Do not work around it — the decision is the user's to make. (`status` stays usable so the link can be diagnosed.)
 
 3. After consent is `READY`, perform the browser preflight for the configured target with the bundled transport driver, following `references/transport-<target>.md`:
 

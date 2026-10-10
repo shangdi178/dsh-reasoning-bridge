@@ -222,17 +222,22 @@ test('fetch rejects non-https urls with a usage error', async () => {
 
 // --- pre-send gates ----------------------------------------------------------
 
-test('send refuses to transmit when consent is not READY', async () => {
-  // A fresh DSH_REASONING_BRIDGE_HOME has no consent.json, so the gate blocks
-  // before any CDP work — and this must hold for the CLI, not just the prose.
-  const dir = await mkdtemp(join(tmpdir(), 'bridge-gate-'));
+test('every browser-driving subcommand respects the consent gate', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'bridge-gates-'));
   const previous = process.env.DSH_REASONING_BRIDGE_HOME;
   process.env.DSH_REASONING_BRIDGE_HOME = dir;
   try {
     const file = join(dir, 'request.txt');
     await writeFile(file, 'BEGIN_CONTEXT_PACKET\npacket_id: p\nEND_CONTEXT_PACKET\n', 'utf8');
+    const out = join(dir, 'reply.txt');
+    const closedPort = 10000 + Math.floor(Math.random() * 20000);
+    // open/probe/send/fetch all touch the site; none may run undecided.
     assert.equal(await main(['send', '--file', file, '--json']), 1);
     assert.equal(await main(['probe', '--json']), 1);
+    assert.equal(await main(['open', '--json']), 1);
+    assert.equal(await main(['fetch', '--url', 'https://chatgpt.com/c/x', '--out', out, '--json']), 1);
+    // status is a read-only port probe and must stay usable for diagnosis.
+    assert.equal(await main(['status', '--json', '--port', String(closedPort)]), 0);
   } finally {
     if (previous === undefined) delete process.env.DSH_REASONING_BRIDGE_HOME;
     else process.env.DSH_REASONING_BRIDGE_HOME = previous;
