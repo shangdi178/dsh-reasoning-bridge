@@ -7,26 +7,60 @@ Audit release. A README-vs-implementation review plus two independent audits
 documentation were **prose, not code**. This release turns the cheap ones into
 mechanisms and rewrites the rest so the docs describe what actually happens.
 
+A third, adversarial audit of the first pass then found three more holes — one of
+them a regression this release introduced — so the notes below describe the final
+state, not the intermediate one.
+
+**Regression caught and fixed**
+
+- **The widened scanner blocked legitimate packets.** The generic rules matched
+  *any* non-space right-hand side, so `const token = getToken();`,
+  `api_key=YOUR_KEY_HERE`, `Authorization: <your-token-here>` and
+  `Cookie: session=abc123` all tripped it. A gate that blocks real work is worse
+  than the misses it closes, because it teaches operators to pass
+  `--allow-unscanned`. The rules now require the *value* to look like key
+  material, and a name that is explicitly a password/passphrase relaxes the
+  diversity test so `DB_PASS=correcthorsebatterystaple` is still caught.
+  Measured: 0 false positives on 21 legitimate samples, 13/14 real secrets
+  caught (the miss is a password in prose, which is irreducibly semantic).
+
 **Turned into enforced code**
 
-- **Consent is now a gate, not a suggestion.** `transport.mjs open|probe|send|fetch`
+- **Consent is now a gate, not a suggestion.** `transport.mjs open|probe|send|fetch|launch`
   read the versioned decision and fail with `why: "consent-not-ready"` unless it
   is `READY`; the panel's `/open`, `/launch`, `/probe` routes return 403.
   Previously `transport.mjs` never imported `consent.mjs`, so a disabled install
-  was still one command away from driving the browser. `status` deliberately
+  was still one command away from driving the browser — and `launch` stayed a
+  working un-gated path even after the first pass, starting a debug Chrome with
+  no consent file while the panel refused the same request. `status` deliberately
   stays usable (it only probes the debug port) so the link can be diagnosed
   while the decision is pending.
+- **An unsupported `--site` can no longer borrow another target's module.**
+  `resolveTarget` fell back to the chatgpt page module for any URL, so
+  `--site https://example.com/` navigated an arbitrary site while reporting
+  `target: "chatgpt"` — driving a page with selectors never written for it. It
+  now requires a known site plus a matching target and fails with a usage error.
+- **UTF-16 request files are no longer a scan bypass.** Reading them as UTF-8
+  yields interleaved NULs, so no pattern matched while the composer still
+  received the secret as mojibake. Request files are decoded (BOM or NUL
+  heuristic) before scanning.
+- **The adoption record needs per-proposal evidence.** One arbitrary string used
+  to satisfy the whole record; every accepted item must now carry its own
+  `local_evidence` anchor. This is still structure, not proof — the gate cannot
+  verify an anchor names a real symbol — and both the reference and the code
+  comment now say exactly that.
 - **`send` refuses credential-shaped request files.** The scanner is now wired
   into the send path (`why: "secret-scan-failed"`) instead of being a separate
   CLI step an agent had to remember; `--allow-unscanned` is the deliberate
   override. The scan is exported as `scanForSecrets()` from `validate.mjs`.
 - **The scan itself was weak.** It caught 7 shapes and missed every JWT, cloud
-  secret key, connection string, webhook, and `.env` line. It now covers 20
-  families: PEM/PGP keys, AWS (id + secret), GitHub/GitLab/npm/HF, Slack/Discord
-  webhooks, OpenAI/Stripe/Google/Azure keys, JWTs, `user:pass@host` connection
-  strings, `Authorization`/`Cookie` headers, and bare `secret:`/`DB_PASSWORD=`
-  assignments. Two regex bugs were also fixed: `sk_live_` (underscore) never
-  matched, and a leading `\b` failed after `=`.
+  secret key, connection string, webhook, and `.env` line. It now covers: PEM/PGP
+  keys, AWS (id + secret), GitHub/GitLab/npm/HF, Slack/Discord webhooks,
+  OpenAI/Stripe/Google/Azure/Twilio keys, JWTs, `user:pass@host` connection
+  strings, `Authorization`/`Cookie` headers, and `KEY: value` / `.env`-style
+  credential assignments (value-checked, see the regression note above). Two
+  regex bugs were also fixed: `sk_live_` (underscore) never matched, and a
+  leading `\b` failed after `=`.
 - **`complete` re-scans what it hashes.** `verifyReceiptArtifacts()` previously
   verified SHA-256 only; a packet containing `password: hunter2` passed
   `complete` while failing `packet`. It now re-runs the credential scan on the
@@ -68,7 +102,7 @@ mechanisms and rewrites the rest so the docs describe what actually happens.
 - Corrected stale claims: five → six transport subcommands; the test count; and
   the run-artifact location now that packets are written outside the repo.
 
-- 59 node:test cases (was 51)
+- 63 node:test cases (was 51)
 
 ## 0.3.0 — 2026-09-08
 
