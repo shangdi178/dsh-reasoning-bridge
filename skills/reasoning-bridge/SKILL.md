@@ -66,6 +66,8 @@ Delegation rules:
 
    `send` re-runs the credential scan on the request file and refuses with `why: "secret-scan-failed"` when it hits. That refusal is a stop condition: redact the packet and re-validate. `--allow-unscanned` exists for a case you have personally reviewed; do not use it to route around the gate.
 
+   The scan is a shape heuristic and its clear form is a limited one. It does **not** catch keys that were split across lines or spaced out, base64/hex-encoded secrets, truncated tokens, bare high-entropy strings, internal hostnames, private IPs, personal data, or business-semantic secrets that match no known pattern. A clean scan means "no known shape matched" — it never means the packet is safe to send.
+
 7. Read `references/transport-<target>.md`. Recheck visible sign-in, requested model, and blocker state immediately before transmission. Compose the reasoning request — the exact wrapper from [references/reasoning-request.md](references/reasoning-request.md) wrapping the validated packet — into one UTF-8 file, and send it with exactly one call:
 
    ```bash
