@@ -31,14 +31,46 @@ const RESULT_SECTIONS = [
   '## Unknowns',
 ];
 
+/**
+ * Credential-shape heuristics. These are a necessary-but-insufficient barrier:
+ * they catch well-known shapes and obvious `key: value` assignments, they cannot
+ * understand business secrets. The semantic privacy review in SKILL.md stays
+ * mandatory, and `send` refuses to run until this scan is clean.
+ */
 const SECRET_PATTERNS = [
-  /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i,
-  /\bAKIA[0-9A-Z]{16}\b/,
+  // Private key blocks (including PGP / OpenSSH / PKCS#8 variants).
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----/i,
+  // AWS access key id, and the standalone 40-char secret access key.
+  /\b(?:AKIA|ASIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA)[0-9A-Z]{16}\b/,
+  /aws_secret_access_key\s*[:=]\s*(?!\[REDACTED\])\S+/i,
+  // VCS / CI / chat / infra tokens.
   /\bgh[pousr]_[A-Za-z0-9]{20,}\b/,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/,
   /\bglpat-[A-Za-z0-9_-]{20,}\b/,
   /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/,
-  /\bsk-[A-Za-z0-9_-]{20,}\b/,
-  /\b(?:api[_-]?key|access[_-]?token|client[_-]?secret|password)\s*[:=]\s*(?!\[REDACTED\])\S+/i,
+  /\bnpm_[A-Za-z0-9]{36}\b/,
+  /\bhf_[A-Za-z0-9]{30,}\b/,
+  /\bsk-(?:live|test|proj|ant|or)?-?[A-Za-z0-9_-]{20,}\b/,
+  // Stripe-style `sk_live_…` / `rk_test_…` (underscore separators).
+  /\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}\b/,
+  // Google / Azure / generic cloud keys.
+  /\bAIza[0-9A-Za-z_-]{35}\b/,
+  /\bAccountKey\s*=\s*(?!\[REDACTED\])[A-Za-z0-9+/=]{20,}/i,
+  /\b(?:LTAI|AKID)[A-Za-z0-9]{12,}\b/,
+  // JWTs (three base64url segments) — caught even when embedded in a header.
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
+  // Connection strings that embed a password.
+  /\b[a-z][a-z0-9+.-]{2,}:\/\/[^\s:@/]+:[^\s:@/]{3,}@/i,
+  // Authorization / cookie headers and webhook URLs.
+  /\bAuthorization\s*:\s*(?!\[REDACTED\])\S+/i,
+  /\b(?:Cookie|Set-Cookie)\s*:\s*(?!\[REDACTED\])\S+/i,
+  /https:\/\/hooks\.slack\.com\/services\/\S+/i,
+  /https:\/\/(?:discord|discordapp)\.com\/api\/webhooks\/\S+/i,
+  // Generic `key: value` / `key = value` credential assignments, including the
+  // .env shapes the earlier list missed (bare secret/token/passwd, DB_PASS...).
+  /\b(?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?key|private[_-]?key|password|passwd|pwd|secret|token|credential)s?\s*[:=]\s*(?!\[REDACTED\])\S+/i,
+  // .env-style SCREAMING_CASE assignments whose name ends in a secret noun.
+  /^\s*[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|CREDENTIAL)S?\s*=\s*(?!\[REDACTED\])\S+/m,
 ];
 
 
@@ -57,6 +89,18 @@ export function estimateTokens(text) {
   const cjk = (text.match(/[\u3400-\u9fff\uf900-\ufaff]/g) ?? []).length;
   const nonCjk = text.replace(/[\u3400-\u9fff\uf900-\ufaff]/g, '');
   return cjk + Math.ceil(nonCjk.length / 4);
+}
+
+/**
+ * Credential-shape scan, exported so the transport driver can enforce it on the
+ * send path instead of trusting a separately-run CLI step.
+ * Returns the list of matched shapes (empty = clean); never throws.
+ */
+export function scanForSecrets(text) {
+  const haystack = typeof text === 'string' ? text : '';
+  return SECRET_PATTERNS
+    .map((pattern, index) => (pattern.test(haystack) ? `secret-pattern-${index + 1}` : null))
+    .filter(Boolean);
 }
 
 export function sha256Text(text) {
@@ -256,6 +300,18 @@ export function receiptCompletionErrors(receipt) {
     if (receipt[field] !== 'passed') errors.push(`${field} is not passed`);
   }
   if (receipt.adoption.status !== 'passed') errors.push('adoption is not passed');
+  // The gate must not accept a bare `status: "passed"`: a run that accepted
+  // nothing still has to say why, and every accepted proposal needs the local
+  // evidence that justified it. Otherwise `complete` is pure self-attestation.
+  if (!receipt.adoption.local_evidence.length) {
+    errors.push('adoption.local_evidence must record at least one locally reopened anchor');
+  }
+  const classified = receipt.adoption.accepted.length
+    + receipt.adoption.rejected.length
+    + receipt.adoption.deferred.length;
+  if (!classified) {
+    errors.push('adoption must classify at least one proposal (accepted, rejected or deferred)');
+  }
   if (!['applied', 'no_changes_needed'].includes(receipt.local_changes.status)) {
     errors.push('local_changes is not complete');
   }
@@ -272,6 +328,11 @@ export async function verifyReceiptArtifacts(receipt, baseDirectory) {
       const actual = sha256Text(content);
       if (actual !== artifact.sha256) {
         errors.push(`${field} sha256 mismatch: expected ${artifact.sha256}, actual ${actual}`);
+      }
+      // Re-scan the artifact we just hashed. `privacy_review.credentials_scan_passed`
+      // is a self-declared boolean; the completion gate must not rest on it.
+      if (scanForSecrets(content).length) {
+        errors.push(`${field} artifact still contains a likely secret; redact it and re-hash`);
       }
     } catch (error) {
       errors.push(`${field} artifact cannot be read: ${error.message}`);

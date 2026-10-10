@@ -148,4 +148,62 @@ test('the scoped injection mounts the loopback routes that the panel calls', asy
   assert.match(badTarget.payload, /unknown target/);
   assert.match(badTarget.payload, /chatgpt/);
   assert.match(badTarget.payload, /arena/);
+
+  // /open drives the browser, so the consent gate is evaluated before anything
+  // else — an undecided install is refused whatever the body says.
+  const blockedOpen = await call({
+    method: 'POST',
+    url: '/reasoning-bridge/open',
+    body: JSON.stringify({ target: 'chatgpt' }),
+  });
+  assert.equal(blockedOpen.status, 403);
+  assert.match(blockedOpen.payload, /consent/i);
+
+  // /target is a read-modify-write of local settings, not a browser action: it
+  // stays reachable while consent is undecided, and it validates the id against
+  // the shared table instead of passing free text through.
+  const blockedProbe = await call({ method: 'POST', url: '/reasoning-bridge/probe' });
+  assert.equal(blockedProbe.status, 403);
+});
+
+test('the Host guard accepts the port the server is actually listening on', async () => {
+  // Regression: webPort() used to read the loader entry only. A profile whose
+  // port is an `!!js` expression leaves a function there, the lookup fell back
+  // to 3080, and every route 403'd against the real Host header.
+  const routes = [];
+  const ctx = {
+    effect: (fn) => { fn(); },
+    skills: { register: () => () => {} },
+    systemPrompt: { section: () => {} },
+    settings: { register: () => {} },
+    inject: (deps, callback) => {
+      if (deps.includes('webServer')) {
+        callback({
+          effect: (fn) => { fn(); },
+          // A `!!js` port expression: the entry carries a function, not a number.
+          loader: { entries: () => [{ options: { name: '@deepseek-ai/dsh-host-webserver', config: { port: () => 38080 } } }] },
+          webServer: { register: (route) => { routes.push(route); } },
+        });
+      }
+    },
+  };
+  apply(ctx);
+
+  const call = async ({ host, localPort }) => {
+    const req = {
+      method: 'GET',
+      url: '/reasoning-bridge/state',
+      headers: { host },
+      socket: { remoteAddress: '127.0.0.1', localPort },
+      on: () => req,
+    };
+    let status = 0;
+    const res = { writeHead: (code) => { status = code; }, end: () => {} };
+    await routes[0].handler(req, res);
+    return status;
+  };
+
+  assert.equal(await call({ host: '127.0.0.1:38080', localPort: 38080 }), 200, 'the real listening port must pass');
+  assert.equal(await call({ host: 'localhost:38080', localPort: 38080 }), 200);
+  assert.equal(await call({ host: 'evil.example.com', localPort: 38080 }), 403, 'foreign Host still refused');
 });

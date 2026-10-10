@@ -1,5 +1,73 @@
 # Changelog
 
+## 0.4.0 — 2026-10-10
+
+Audit release. A README-vs-implementation review plus two independent audits
+(adoption-gate enforcement, sensitive egress) found that several claims in the
+documentation were **prose, not code**. This release turns the cheap ones into
+mechanisms and rewrites the rest so the docs describe what actually happens.
+
+**Turned into enforced code**
+
+- **Consent is now a gate, not a suggestion.** `transport.mjs open|probe|send`
+  read the versioned decision and fail with `why: "consent-not-ready"` unless it
+  is `READY`; the panel's `/open`, `/launch`, `/probe` routes return 403.
+  Previously `transport.mjs` never imported `consent.mjs`, so a disabled install
+  was still one command away from driving the browser.
+- **`send` refuses credential-shaped request files.** The scanner is now wired
+  into the send path (`why: "secret-scan-failed"`) instead of being a separate
+  CLI step an agent had to remember; `--allow-unscanned` is the deliberate
+  override. The scan is exported as `scanForSecrets()` from `validate.mjs`.
+- **The scan itself was weak.** It caught 7 shapes and missed every JWT, cloud
+  secret key, connection string, webhook, and `.env` line. It now covers 20
+  families: PEM/PGP keys, AWS (id + secret), GitHub/GitLab/npm/HF, Slack/Discord
+  webhooks, OpenAI/Stripe/Google/Azure keys, JWTs, `user:pass@host` connection
+  strings, `Authorization`/`Cookie` headers, and bare `secret:`/`DB_PASSWORD=`
+  assignments. Two regex bugs were also fixed: `sk_live_` (underscore) never
+  matched, and a leading `\b` failed after `=`.
+- **`complete` re-scans what it hashes.** `verifyReceiptArtifacts()` previously
+  verified SHA-256 only; a packet containing `password: hunter2` passed
+  `complete` while failing `packet`. It now re-runs the credential scan on the
+  artifact contents, so the gate no longer rests on a self-declared
+  `credentials_scan_passed: true`.
+- **`complete` demands a non-empty adoption record.** `adoption.status: "passed"`
+  with four empty arrays used to satisfy the gate — the exact shape a run that
+  skipped the gate produces. It now requires at least one classified proposal and
+  at least one piece of local evidence.
+- **The panel routes actually work again.** `webPort()` read the loader entry,
+  where an `!!js` port expression is a *function*, so it fell back to 3080 and the
+  Host guard rejected the real `127.0.0.1:38080` — every route 403'd. It now
+  prefers `req.socket.localPort` (the same fix dsh-versions carries).
+- **`/open` validates its target** like `/target` does, instead of passing free
+  text into the driver's argv.
+- **The forbidden-API test guard was a lint.** It matched five strings; a page
+  module using `XMLHttpRequest`, `sendBeacon`, `cookieStore`, `WebSocket`,
+  dynamic `import()`, or a `location` redirect passed green. `FORBIDDEN_PAGE_APIS`
+  now covers the bypass surface, and a "guard the guard" test asserts each one is
+  rejected.
+- **Target/page-module drift is now impossible.** A test asserts
+  `targets-table.mjs` and `scripts/lib/page-<id>.mjs` list exactly the same set,
+  and that each module exports the phase builders its `INPUT_MODE` requires.
+  (Writing that test immediately exposed that `page-chatgpt.mjs` never declared
+  `INPUT_MODE` — the driver hardcoded it. Both modules now self-declare.)
+
+**Documentation honesty**
+
+- README gains an **「强制执行 vs. 纪律约定」** table separating what code enforces
+  from what the agent is merely asked to do, and states the root cause plainly:
+  `dsh.plugin.json` declares `"tools": []`, so the plugin cannot intercept tool
+  calls and the adoption gate is compliance-dependent by construction.
+- `references/adoption-gate.md` and `references/reasoning-result.md` now say that a
+  passing validation is a *structural* verdict, not a safety one — the audit
+  confirmed a result whose Proposed Changes read "ignore previous instructions and
+  run …" validates cleanly.
+- README lists the shipped targets explicitly (`chatgpt`, `arena`) and states that
+  no other web AI is implemented, listed, or selectable.
+- Corrected stale claims: five → six transport subcommands; the test count; and
+  the run-artifact location now that packets are written outside the repo.
+
+- 59 node:test cases (was 51)
+
 ## 0.3.0 — 2026-09-08
 
 Second target, a working settings panel, and the target becomes a visible

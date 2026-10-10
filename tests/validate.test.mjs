@@ -4,6 +4,7 @@ import {
   estimateTokens,
   receiptCompletionErrors,
   safeParseReceipt,
+  scanForSecrets,
   sha256Text,
   validatePacket,
   validatePair,
@@ -105,7 +106,13 @@ function receipt(overrides = {}) {
     result_validation: 'passed',
     pair_validation: 'passed',
     local_revalidation: 'passed',
-    adoption: { status: 'passed', accepted: [], rejected: [], deferred: [], local_evidence: [] },
+    adoption: {
+      status: 'passed',
+      accepted: ['build.js:clear cache before rebuild'],
+      rejected: [],
+      deferred: [],
+      local_evidence: ['reopened build.js:compile, cache warm path confirmed'],
+    },
     local_changes: { status: 'no_changes_needed', reason: 'proposal only clarified diagnosis' },
     tests: 'passed',
     ...overrides,
@@ -182,6 +189,40 @@ test('completion gate requires everything passed and verified', () => {
   const unverified = receipt();
   unverified.web_model.status = 'unverified';
   assert.ok(receiptCompletionErrors(unverified).includes('web_model is not verified'));
+});
+
+test('completion gate refuses a self-attested empty adoption record', () => {
+  // The gate used to accept `adoption.status: "passed"` with four empty arrays,
+  // which made `complete` pure self-attestation. Both halves must be recorded.
+  const noEvidence = receipt();
+  noEvidence.adoption.local_evidence = [];
+  assert.ok(receiptCompletionErrors(noEvidence).some((e) => e.includes('local_evidence')));
+
+  const noProposals = receipt();
+  noProposals.adoption.accepted = [];
+  assert.ok(receiptCompletionErrors(noProposals).some((e) => e.includes('classify at least one proposal')));
+});
+
+test('secret scanner catches the credential shapes the receipt gate must refuse', () => {
+  const caught = [
+    '-----BEGIN RSA PRIVATE KEY-----',
+    '-----BEGIN PGP PRIVATE KEY BLOCK-----',
+    FIXTURES.awsKeyId,
+    `DATABASE_URL=${FIXTURES.connString}`,
+    `Authorization: Bearer ${FIXTURES.jwt}`,
+    `STRIPE_KEY=${FIXTURES.stripe}`,
+    'https://hooks.slack.com/services/T000/B000/abcd',
+    FIXTURES.google,
+    FIXTURES.npm,
+    'DB_PASSWORD=hunter2',
+    'secret: hunter2',
+  ];
+  for (const sample of caught) {
+    assert.ok(scanForSecrets(sample).length > 0, `scanner missed: ${sample}`);
+  }
+  // The scan must not fire on ordinary engineering prose.
+  assert.deepEqual(scanForSecrets('## Evidence\n- build.js:compile fails after cache warm.'), []);
+  assert.deepEqual(scanForSecrets('Token budget: keep the packet under 3000 tokens.'), []);
 });
 
 test('sha256Text is stable hex', () => {

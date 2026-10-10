@@ -1,25 +1,33 @@
 # 发布清单（dsh-reasoning-bridge → npm / GitHub）
 
-> ⏳ **v0.2.0 待发布**（2026-09-07）：可执行传输层已落地并通过本地验证（npm test 34 例全绿 +
-> 中立站点 launch/probe/send/fetch 真机冒烟），按 §4 流程发布。0.2.0 起 CI 矩阵为 node 22/24。
+> ⏳ **v0.4.0 待发布**（2026-10-10）：审计加固版——consent 与凭据扫描变成发送前
+> 代码闸门、`complete` 复扫产物、面板端口 403 修复、扫描器扩到 20 类、
+> README 增「强制执行 vs. 纪律约定」表。npm test 59 例全绿 + 活体面板路由验证通过。
 >
-> 📌 **v0.1.0（2026-09-05）**：GitHub main + `v0.1.0` 标签 + Release ✅；
-> npm publish 因账号 2FA 一直未完成——0.2.0 发布时一并覆盖，无需补发 0.1.0。
+> 📌 **v0.3.0 / v0.2.0 未发布**：代码与 CHANGELOG 已就位，npm publish 因 2FA 未完成；
+> 0.4.0 发布时一并覆盖，无需补发。
+>
+> 📌 **v0.1.0（2026-09-05）**：GitHub main + `v0.1.0` 标签 + Release ✅。
 
 ## 0. 发布面已确认
 
-`npm pack --dry-run` 通过，产物含且仅含 20 个文件（23.7 kB）：
+`npm pack --dry-run` 通过，产物含且仅含 **30 个文件**（打包 69.8 kB / 解包 206.2 kB）：
 
 ```
-CHANGELOG.md  DESIGN.md  LICENSE  README.md  dsh.plugin.json
-lib/index.js  package.json
+CHANGELOG.md  DESIGN.md  LICENSE  README.md
+cordis.patch.yml  dsh.plugin.json  package.json
+lib/index.js  lib/web.js  lib/client.js
 skills/reasoning-bridge/SKILL.md
-skills/reasoning-bridge/references/*.md  (7 份契约)
-skills/reasoning-bridge/scripts/*.mjs     (4 个确定性脚本)
+skills/reasoning-bridge/references/*.md   (9 份契约/适配器)
+skills/reasoning-bridge/scripts/*.mjs     (6 个确定性脚本)
+skills/reasoning-bridge/scripts/lib/*.mjs (4 个驱动模块)
 ```
 
 无 tests/、无 .github、无 node_modules。`files` 白名单在 package.json；
 若新增顶层目录或改白名单，先重跑 `npm pack --dry-run`。
+
+> 发布前检查：`lib/web.js`（面板路由，web profile 专属）与 `lib/client.js`
+> （设置面板 UI）以前漏在白名单外，现已包含——改 `files` 后务必核对本节计数。
 
 ## 1. npm 发布（需 2FA，本机终端执行）
 

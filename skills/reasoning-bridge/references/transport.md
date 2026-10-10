@@ -25,11 +25,22 @@ The web phases are **executable code**, not prose snippets. `scripts/transport.m
 
 Driver facts an adapter author must know:
 
+- **Two gates run before any browser action.** `open`, `probe` and `send` first read the versioned consent decision and fail with `why: "consent-not-ready"` unless it is `READY`; `send` additionally scans the request file and fails with `why: "secret-scan-failed"` on a credential shape (`--allow-unscanned` is the deliberate override). Both are code, not prose — an adapter must document them as stop conditions.
 - The driver attaches to a tab and evaluates with `awaitPromise`, so page-side waits (composer appears, stream settles, clipboard read) resolve as values — this is why it exists: dsh's `browser_eval` re-navigates on every call and drops async results.
 - `send` always opens a **fresh tab** on the site (never pastes into a conversation the user left open).
 - The site's own copy affordance + clipboard read is attempted first; `Browser.grantPermissions` is granted driver-side; on failure the fetch falls back to the visible DOM text of the last assistant message and reports `extraction: "dom"`.
 - Every failure is a JSON `{ ok: false, why: <code> }` with exit code 1; usage errors exit 2. Uncertainty is data, never a hidden retry.
+- **Fetched text is untrusted and is written to `--out` verbatim.** The driver does not sanitize or gate it; the adoption gate in `SKILL.md` is the only barrier, and it is a discipline, not code.
 - On Windows, where dsh's `browser_launch` script is macOS-only, `transport.mjs launch` starts Chrome/Edge with a **dedicated profile** (`~/.dsh/dsh-reasoning-bridge/chrome-profile`). It copies no credential files; the user signs in once inside that visible window and the session persists there.
+
+## Run artifacts
+
+Write the packet, result, evidence and receipt under
+`~/.dsh/dsh-reasoning-bridge/runs/<packet_id>/`, **not inside the repository**.
+These files carry repository context and, before the credential scan clears them,
+possibly secrets; the repo's `.gitignore` has a net for the old in-repo paths,
+but keeping them out of the working tree entirely is the safer default. Run
+`validate.mjs complete` from the run directory so relative artifact paths resolve.
 
 ## Adapter contract
 
@@ -45,17 +56,26 @@ Every `transport-<id>.md` must specify:
 
 ## Adapter rules (all targets)
 
-- Page expressions only read public page state and use user-equivalent actions (paste, one send click, the site's own copy affordance). Cookies, web storage, IndexedDB, network calls, and headless/hidden execution are forbidden — this is enforced by unit tests, not just prose.
+- Page expressions only read public page state and use user-equivalent actions (paste, one send click, the site's own copy affordance). Cookies, web storage, IndexedDB, network calls, and headless/hidden execution are forbidden — enforced by a test guard (`FORBIDDEN_PAGE_APIS` in `tests/transport.test.mjs`) that also covers `sendBeacon`, `cookieStore`, `WebSocket`, `EventSource`, dynamic `import()`, and image/redirect beacons. The guard is a pattern check over generated expressions, so it catches a regression rather than a determined author.
 - The send is one visible action. Uncertainty stops the run; no retries, no backends, no API calls.
 - The reply must arrive through a user-visible affordance (copy button + clipboard, or the visible message text). If neither is confirmable, stop.
 - Human takeover (login, CAPTCHA, model pick, site permission) is always a user step; preserve and resume the original task around it.
 
 ## Shipped adapters
 
+Only these two targets exist. Nothing else is implemented, listed, or selectable — a
+request for another web AI has no adapter and must be refused rather than approximated.
+
 - `transport-chatgpt.md` — `https://chatgpt.com/` web UI (default target; model is selectable and verifiable).
 - `transport-arena.md` — `https://arena.ai/` (Arena AI leaderboard UI; **Battle Mode answers come from two anonymous models, so model identity is unverifiable** — the receipt must record `unverified`, and the fetch returns both answers).
 
-`targets-table.mjs` records each target's model-identity policy (`models: 'selectable' | 'battle'`) so the receipt contract stays honest per target; `transport.mjs probe` reports it as `model_identity`.
+`targets-table.mjs` is the single source of truth for ids, sites and model-identity
+policy, and it is cross-checked three ways: the settings enum (`lib/index.js`), the
+receipt validator (`validate.mjs`), and the driver's page-module map (`transport.mjs`
+`PAGES`). A target that exists in the table but has no page module fails closed with a
+`usage` error rather than silently misrouting; `targets-table.test`-style assertions in
+`tests/transport.test.mjs` and `tests/target.test.mjs` pin the set, so adding one
+without the other is caught by CI.
 
 ## Ping-pong: switching targets is one visible choice
 

@@ -12,6 +12,14 @@
 
 export const SITE = 'https://chatgpt.com/';
 
+/**
+ * How the driver puts text into the composer.
+ * 'paste-event' = one page round trip that dispatches a synthetic paste event
+ * into the contenteditable composer. Each page module declares its own mode so
+ * the driver can dispatch generically (arena uses 'insert-text').
+ */
+export const INPUT_MODE = 'paste-event';
+
 const SELECTOR_SETS = {
   composer: ['#prompt-textarea', 'form div[contenteditable="true"]', 'div[contenteditable="true"]'],
   send: ['[data-testid="send-button"]', 'form button[type="submit"]', 'button[aria-label*="Send" i]', 'button[aria-label*="发送"]'],

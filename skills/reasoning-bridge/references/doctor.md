@@ -32,9 +32,11 @@ node <skillDir>/scripts/consent.mjs enable --acknowledge-risk I_ACCEPT_EXPERIMEN
 
 On decline run `node <skillDir>/scripts/consent.mjs disable --json`. For `AUTOMATION_DISABLED`, do not open, claim, inspect, or control the target site.
 
-Then perform the volatile browser checks on every handoff, using the bundled transport driver per `references/transport-<target>.md` (the driver needs Node ≥ 22 — `transport.mjs` reports `why: "node-too-old"` otherwise):
+Then perform the volatile browser checks on every handoff, using the bundled transport driver per `references/transport-<target>.md` (the driver needs Node ≥ 22 — `transport.mjs` reports `why: "node-too-old"` otherwise, unless `reasoning-bridge.checkNodeRuntime` is switched off):
 
 1. `node <skillDir>/scripts/transport.mjs status --json`: if `running:false`, prefer dsh's `browser_launch` (reuses your everyday Chrome login state on macOS); when that tool is unavailable or fails — e.g. on Windows, where its launcher is macOS-only — run `node <skillDir>/scripts/transport.mjs launch --json`, which starts a visible Chrome/Edge with a dedicated profile that copies no credentials. If the browser cannot be started at all, return `NEEDS_BROWSER`.
+
+   **The consent decision is now checked in code here.** `open`, `probe` and `send` fail with `why: "consent-not-ready"` unless the decision is `READY`, and the panel's open/launch/probe routes return 403. That is a stop condition: do not seek another route to the browser, and do not re-run `enable` on the user's behalf.
 2. `node <skillDir>/scripts/transport.mjs probe --json`: opens the target site read-only. If the site cannot load, return `NEEDS_SITE_PERMISSION` and stop.
 3. If the probe reports `logged_out:true`, return `NEEDS_LOGIN`, ask the user to take over the visible page and sign in (inside the dedicated profile window on first use), then recheck. Preserve the original task for resume.
 4. Check the user-requested model in the visible UI (the probe's `model_label` is supporting evidence only). If unavailable or not selected, return `NEEDS_MODEL_SELECTION`; never silently substitute another model.

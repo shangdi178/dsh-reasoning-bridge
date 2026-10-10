@@ -78,3 +78,31 @@ validate.mjs 共享此表，不会漂移）+ `scripts/lib/page-<id>.mjs` 写该�
 选择器集与阶段表达式 + `references/transport-<id>.md` 按适配器契约写清
 登录探测 / 模型校验 / 一次性发送 / 可见取回 / 阻断态 / 证据。
 Packet、Result、采纳门、回执契约不需要任何改动。
+
+页面模块需自带 `INPUT_MODE`（`paste-event` 或 `insert-text`）与对应阶段函数：
+`paste-event` 导出 `buildSendExpression`，`insert-text` 导出
+`buildComposerFocusExpression` + `buildSendAfterInsertExpression`；两者都必须导出
+`buildProbeExpression` 与 `buildFetchExpression`。`tests/transport.test.mjs` 会断言
+「表里的目标」与「page-*.mjs 文件」一一对应，并逐个检查导出契约——少写一边 CI 就红。
+
+## 5. 0.4.0 审计：把「宣称」与「机制」分开
+
+0.4.0 之前，README 的多条承诺（采纳门、发送前脱敏、consent 闸门）**只有散文、
+没有代码**。根因是结构性的：`dsh.plugin.json` 声明 `"tools": []`，插件不注册任何
+工具，因此**无法拦截**模型对 `pwsh`/`edit`/`write` 的调用——采纳门在设计上就只能
+是「请求模型遵守」。
+
+审计（一次 README-vs-实现 走查 + 两次独立子审计：采纳门绕过、敏感外发）的处置原则：
+
+- **能变机制的立刻变机制**：consent 前置闸门（`open|probe|send`）、发送前凭据扫描
+  （`send` 命中即拒）、`complete` 复扫产物内容、采纳记录非空要求、面板端口解析修复。
+- **变不成机制的诚实标注**：README 增「强制执行 vs. 纪律约定」表，
+  `adoption-gate.md`、`reasoning-result.md` 明写「校验通过=结构合规，不等于安全」。
+- **顺手修掉的确定性缺陷**：扫描器从 7 条扩到 20 类（JWT/云密钥/连接串/webhook/.env
+  原先全漏，且 `sk_live_` 与 `\b` 两处正则本身写错）；测试守卫从 5 字符串扩到覆盖
+  `sendBeacon`/`cookieStore`/`WebSocket`/`import()` 等绕过面；`checkNodeRuntime`
+  从死配置变成真闸门；`.gitignore` 补上运行产物。
+
+教训记在这里：**任何「我们把 X 关在门外」的表述，都要能指向一行拒绝执行的代码**，
+否则就写成纪律，并说明它依赖遵守。
+

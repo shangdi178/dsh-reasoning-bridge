@@ -8,6 +8,12 @@
 // Stdout carries exactly one JSON result; diagnostics go to stderr.
 // Disciplines: one send attempt, no retries on uncertainty, no cookies or
 // storage access, no private endpoints, visible windows only (never headless).
+//
+// Two gates are enforced HERE, in code, before any browser action:
+//   1. consent  — the versioned risk decision must be READY (consent.json).
+//   2. scan     — the outbound request file must be free of credential shapes.
+// Everything else in the skill (adoption gate, semantic privacy review) is a
+// discipline the agent follows; see README "Enforced vs. discipline".
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -25,22 +31,20 @@ import {
   newPageTarget,
   probeEndpoint,
 } from './lib/cdp.mjs';
-import { buildFetchExpression as buildChatgptFetch, buildProbeExpression as buildChatgptProbe, buildSendExpression as buildChatgptSend } from './lib/page-chatgpt.mjs';
+import * as pageChatgpt from './lib/page-chatgpt.mjs';
 import * as arenaPage from './lib/page-arena.mjs';
+import { readSettings } from './lib/settings-bridge.mjs';
+import { consentStatus, defaultConsentPath } from './consent.mjs';
 import { readState } from './target.mjs';
 import { modelsFor, siteFor, TARGETS } from './targets-table.mjs';
+import { scanForSecrets } from './validate.mjs';
 
 /**
  * Target id -> page module. Each module owns its selectors, its phases, and
  * its INPUT_MODE (how text reaches the composer); this driver only orchestrates.
  */
 const PAGES = {
-  chatgpt: {
-    INPUT_MODE: 'paste-event',
-    buildProbeExpression: buildChatgptProbe,
-    buildSendExpression: buildChatgptSend,
-    buildFetchExpression: buildChatgptFetch,
-  },
+  chatgpt: pageChatgpt,
   arena: arenaPage,
 };
 
@@ -50,12 +54,46 @@ const usage = () => [
   '   or: transport.mjs open [--json] [--target <id> | --site <url>] [--port N]',
   '   or: transport.mjs probe [--json] [--target <id> | --site <url>] [--port N] [--settle-ms N]',
   '   or: transport.mjs send --file <request.txt> [--json] [--target <id> | --site <url>] [--port N]',
-  '           [--composer-wait-ms N] [--send-wait-ms N] [--url-wait-ms N]',
+  '           [--composer-wait-ms N] [--send-wait-ms N] [--url-wait-ms N] [--allow-unscanned]',
   '   or: transport.mjs fetch --url <conversation-url> --out <reply.txt> [--json] [--port N]',
   '           [--screenshot <png>] [--appear-timeout-ms N] [--stream-timeout-ms N] [--stability-ms N]',
 ].join('\n');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Node-runtime gate. The driver needs the native WebSocket global (Node >= 22);
+ * `reasoning-bridge.checkNodeRuntime` in the settings document turns that
+ * requirement into an opt-out for experiments. The setting is read here so it
+ * actually governs something instead of sitting inert in the panel.
+ */
+async function assertRuntime() {
+  const { checkNodeRuntime } = await readSettings();
+  if (checkNodeRuntime === false) return;
+  assertWebSocket();
+}
+
+/**
+ * Consent gate. The versioned risk decision is the plugin's only authorization
+ * surface, so the driver enforces it instead of leaving it to prose: no browser
+ * action toward the target while the decision is missing, stale, or disabled.
+ * Returns null when READY, else the blocking status.
+ */
+async function consentBlock(environment = process.env) {
+  const status = await consentStatus(defaultConsentPath(environment));
+  return status.status === 'READY' ? null : status.status;
+}
+
+/**
+ * Sanitization gate for the outbound request file. The packet contract forbids
+ * credentials, and a pattern scan is the only mechanical part of that promise —
+ * so `send` refuses to transmit a request that trips it. Deliberate override:
+ * an explicit `--allow-unscanned` (the caller then owns the risk).
+ */
+function scanBlock(text) {
+  const hits = scanForSecrets(text);
+  return hits.length ? hits : null;
+}
 
 function pluginHome(environment = process.env) {
   const home = environment.DSH_REASONING_BRIDGE_HOME?.trim() || join(homedir(), '.dsh', 'dsh-reasoning-bridge');
@@ -82,7 +120,9 @@ function parseArgs(argv, { flags = [], values = [] } = {}) {
       out[token.replace(/^--/, '').replace(/-([a-z])/g, (_, char) => char.toUpperCase())] = value;
       index += 1;
     } else if (flags.includes(token)) {
-      out[token.replace(/^--/, '')] = true;
+      // Boolean flags get the same camelCase treatment as value flags, so
+      // `--allow-unscanned` is readable as options.allowUnscanned.
+      out[token.replace(/^--/, '').replace(/-([a-z])/g, (_, char) => char.toUpperCase())] = true;
     } else {
       throw new CdpError(`unknown argument: ${token}`, 'usage');
     }
@@ -214,7 +254,11 @@ async function cmdLaunch(args) {
  * model. It performs no site action beyond navigation.
  */
 async function cmdOpen(args) {
-  assertWebSocket();
+  const consent = await consentBlock();
+  if (consent !== null) {
+    throw new CdpError(`browser automation consent is not READY (${consent})`, 'consent-not-ready');
+  }
+  await assertRuntime();
   const port = integerFlag(args.port ?? defaultPort(), '--port');
   const { site, targetId, models } = await resolveTarget(args);
   const { session, created } = await attachForSite(site, { port });
@@ -227,7 +271,11 @@ async function cmdOpen(args) {
 }
 
 async function cmdProbe(args) {
-  assertWebSocket();
+  const consent = await consentBlock();
+  if (consent !== null) {
+    throw new CdpError(`browser automation consent is not READY (${consent})`, 'consent-not-ready');
+  }
+  await assertRuntime();
   const port = integerFlag(args.port ?? defaultPort(), '--port');
   const { site, page, targetId, models } = await resolveTarget(args);
   const settleMs = args.settleMs ? integerFlag(args.settleMs, '--settle-ms') : undefined;
@@ -243,11 +291,29 @@ async function cmdProbe(args) {
 
 async function cmdSend(args) {
   if (!args.file) throw new CdpError('send requires --file <request.txt>', 'usage');
-  assertWebSocket();
+  const consent = await consentBlock();
+  if (consent !== null) {
+    throw new CdpError(
+      `browser automation consent is not READY (${consent}); decide it in the chat with the exact risk acknowledgement first`,
+      'consent-not-ready',
+    );
+  }
+  await assertRuntime();
   const port = integerFlag(args.port ?? defaultPort(), '--port');
   const { site, page, targetId, models } = await resolveTarget(args);
   const requestText = (await readFile(args.file, 'utf8')).replace(/\r\n?/g, '\n').trim();
   if (!requestText) throw new CdpError(`request file is empty: ${args.file}`, 'usage');
+  if (!args.allowUnscanned) {
+    const hits = scanBlock(requestText);
+    if (hits !== null) {
+      throw new CdpError(
+        `request file tripped the credential scan (${hits.join(', ')}); redact it in the packet, `
+        + 're-validate with `validate.mjs packet`, and retry. Pass --allow-unscanned only if you have '
+        + 'reviewed the file yourself and accept sending it.',
+        'secret-scan-failed',
+      );
+    }
+  }
   const composerWaitMs = args.composerWaitMs ? integerFlag(args.composerWaitMs, '--composer-wait-ms') : undefined;
   const sendWaitMs = args.sendWaitMs ? integerFlag(args.sendWaitMs, '--send-wait-ms') : undefined;
   const urlWaitMs = args.urlWaitMs ? integerFlag(args.urlWaitMs, '--url-wait-ms') : undefined;
@@ -280,7 +346,7 @@ async function cmdSend(args) {
       page.buildSendExpression({ text: requestText, composerWaitMs: composerWait, sendWaitMs: sendWait, urlWaitMs: urlWait }),
       { timeoutMs: composerWait + sendWait + urlWait + 30000 },
     );
-    return { ...result, site, target: targetId, model_identity: models, input_mode: 'paste-event' };
+    return { ...result, site, target: targetId, model_identity: models, input_mode: page.INPUT_MODE };
   } finally {
     session.close();
   }
@@ -295,7 +361,7 @@ async function cmdFetch(args) {
   } catch {
     throw new CdpError(`--url must be an https conversation URL, got ${JSON.stringify(args.url)}`, 'usage');
   }
-  assertWebSocket();
+  await assertRuntime();
   const port = integerFlag(args.port ?? defaultPort(), '--port');
   const appearTimeoutMs = args.appearTimeoutMs ? integerFlag(args.appearTimeoutMs, '--appear-timeout-ms') : undefined;
   const streamTimeoutMs = args.streamTimeoutMs ? integerFlag(args.streamTimeoutMs, '--stream-timeout-ms') : undefined;
@@ -350,7 +416,7 @@ async function cmdFetch(args) {
 const COMMANDS = { status: cmdStatus, launch: cmdLaunch, open: cmdOpen, probe: cmdProbe, send: cmdSend, fetch: cmdFetch };
 
 const VALUE_FLAGS = ['--port', '--browser', '--profile', '--target', '--site', '--settle-ms', '--file', '--url', '--out', '--screenshot', '--composer-wait-ms', '--send-wait-ms', '--url-wait-ms', '--appear-timeout-ms', '--stream-timeout-ms', '--stability-ms'];
-const BOOLEAN_FLAGS = ['--json'];
+const BOOLEAN_FLAGS = ['--json', '--allow-unscanned'];
 
 export async function main(argv = process.argv.slice(2)) {
   const [command, ...rest] = argv;

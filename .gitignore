@@ -1,3 +1,18 @@
 node_modules/
 *.tgz
 .research/
+.smoke/
+
+# Run artifacts: packets, fetched replies, evidence and receipts may contain
+# sensitive repository context (and, before the credential scan clears them,
+# secrets). They must never be committed by accident. Runs belong under
+# ~/.dsh/dsh-reasoning-bridge/runs/<packet_id>/ — these patterns are the net for
+# the in-repo paths the docs used to recommend.
+run/
+runs/
+packet.md
+result.md
+reply.txt
+browser-evidence.md
+receipt.json
+*.receipt.json
