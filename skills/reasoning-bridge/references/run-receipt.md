@@ -36,6 +36,14 @@ The receipt is redacted metadata. It may contain artifact paths, hashes, sizes, 
     "unrelated_files_excluded": true
   },
   "browser_transport": "verified|failed",
+  "handoff": [
+    {"state": "PRECHECKED", "site": "https://chatgpt.com/", "at": "<iso>"},
+    {"state": "COMPOSER_VERIFIED", "site": "https://chatgpt.com/"},
+    {"state": "SEND_INTENT", "confirmed_by": "user in chat"},
+    {"state": "SUBMITTED", "evidence": "user turn visible; conversation /c/<id>"},
+    {"state": "RESULT_OBSERVED", "evidence": "newest assistant turn", "bound_by": "packet_id echo", "packet_id": "<id>"},
+    {"state": "RESULT_VALIDATED", "validator": "validate.mjs result+pair", "packet_id": "<id>"}
+  ],
   "packet_validation": "passed|failed|not_run",
   "result_validation": "passed|failed|not_run",
   "pair_validation": "passed|failed|not_run",
@@ -63,6 +71,8 @@ node <skillDir>/scripts/validate.mjs complete /path/to/receipt.json
 ```
 
 `verified` requires a non-empty observed model and local evidence. Web completion also requires preflight and postflight model visibility. The `complete` gate requires both models verified, every privacy field true, browser transport verified, adoption passed, local changes resolved, every local check passed, and recomputed artifact hashes matching the receipt — and it **re-runs the credential scan on each artifact it hashes**, so a self-declared `credentials_scan_passed` is not enough. The adoption record must classify at least one proposal, record at least one local anchor, and give **every accepted item its own `local_evidence`**; one global string no longer satisfies the whole record.
+
+The optional `handoff` transcript, when present, is validated against the deterministic transport machine (`scripts/lib/handoff-state.mjs`): it must end at `RESULT_VALIDATED`, never enter `UNCERTAIN` (an unconfirmed submit is terminal for that handoff), and bind this run's `packet_id` at RESULT_OBSERVED/RESULT_VALIDATED. Omitting the field keeps legacy receipts valid; including it makes the transport history itself part of the completion proof.
 
 What the gate still cannot do: confirm that an anchor names a real file or symbol, or that you actually reopened it. It checks that the record is *shaped* like honest work, not that the work happened.
 

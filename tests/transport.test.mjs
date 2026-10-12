@@ -48,6 +48,26 @@ test('all page expressions compile as a single async IIFE', () => {
   }
 });
 
+test('page-phase bodies survive their template-literal wrapper', () => {
+  // The body is embedded inside a backtick string. A stray backtick (e.g. inside
+  // a comment) terminates the template early and truncates every later phase —
+  // this shipped once and turned the send uncertainty path into a swallowed
+  // no-op. Each expression must still evaluate to a promise when executed.
+  for (const [name, build] of [
+    ['chatgpt-probe', () => buildProbeExpression()],
+    ['chatgpt-send', () => buildSendExpression({ text: 'x' })],
+    ['chatgpt-fetch', () => buildFetchExpression()],
+    ['arena-probe', () => arenaPage.buildProbeExpression()],
+    ['arena-focus', () => arenaPage.buildComposerFocusExpression()],
+    ['arena-send', () => arenaPage.buildSendAfterInsertExpression({ text: 'x' })],
+    ['arena-fetch', () => arenaPage.buildFetchExpression()],
+  ]) {
+    const expression = build();
+    const compiled = new Function(`return ${expression}`)();
+    assert.equal(typeof compiled.then, 'function', `${name} must evaluate to a promise (body not truncated)`);
+  }
+});
+
 test('send expression embeds the request text verbatim', () => {
   const tricky = 'a "quoted" `backtick` \\slash\ttab\nline\r\nCRLF 中文 ✅ </script>';
   const expression = buildSendExpression({ text: tricky });

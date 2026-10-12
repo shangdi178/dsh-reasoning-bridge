@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TARGET_IDS } from './targets-table.mjs';
+import { STATES, validateTranscript } from './lib/handoff-state.mjs';
 
 export { TARGET_IDS };
 
@@ -365,6 +366,13 @@ export function validateReceipt(receipt) {
   if (!new Set(['verified', 'failed']).has(receipt.browser_transport)) {
     errors.push('browser_transport must be verified or failed');
   }
+  if (receipt.handoff !== undefined) {
+    if (!Array.isArray(receipt.handoff)) {
+      errors.push('handoff must be an array of transcript entries');
+    } else if (!receipt.handoff.every((entry) => entry && typeof entry === 'object' && !Array.isArray(entry) && STATES.includes(entry.state))) {
+      errors.push('handoff entries must be objects with a known state');
+    }
+  }
   for (const field of ['packet_validation', 'result_validation', 'pair_validation', 'local_revalidation', 'tests']) {
     if (!CHECK_STATUSES.has(receipt[field])) {
       errors.push(`${field} must be passed, failed, or not_run`);
@@ -401,6 +409,13 @@ export function receiptCompletionErrors(receipt) {
   if (!receipt.web_model.preflight_visible) errors.push('web_model preflight evidence is not verified');
   if (!receipt.web_model.postflight_visible) errors.push('web_model postflight evidence is not verified');
   if (receipt.browser_transport !== 'verified') errors.push('browser transport is not verified');
+  // The transport state machine is part of the completion claim: a run that never
+  // reached RESULT_VALIDATED — or that entered UNCERTAIN — cannot claim complete,
+  // no matter what the other fields say.
+  if (receipt.handoff !== undefined) {
+    const transcriptErrors = validateTranscript(receipt.handoff, { packetId: receipt.packet_id }).errors;
+    for (const error of transcriptErrors) errors.push(`handoff: ${error}`);
+  }
   for (const field of PRIVACY_FIELDS) {
     if (!receipt.privacy_review[field]) errors.push(`privacy_review.${field} is not passed`);
   }

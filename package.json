@@ -43,7 +43,7 @@
     "skill"
   ],
   "scripts": {
-    "test": "node --test tests/bundle.test.mjs tests/consent.test.mjs tests/plugin.test.mjs tests/settings.test.mjs tests/target.test.mjs tests/transport.test.mjs tests/validate.test.mjs",
+    "test": "node --test tests/bundle.test.mjs tests/consent.test.mjs tests/handoff.test.mjs tests/plugin.test.mjs tests/settings.test.mjs tests/target.test.mjs tests/transport.test.mjs tests/validate.test.mjs",
     "doctor": "node skills/reasoning-bridge/scripts/doctor.mjs --json",
     "validate": "node skills/reasoning-bridge/scripts/validate.mjs",
     "transport": "node skills/reasoning-bridge/scripts/transport.mjs"

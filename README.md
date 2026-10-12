@@ -93,6 +93,16 @@ OpenAI/Stripe/Google/npm/HF/Azure/Twilio 令牌、JWT、带密码的连接串、
   建议修改/测试/风险/未知项）有精确的标记与章节校验，`packet_id` 绑定请求与回答
 - **确定性校验器**：`validate.mjs` 零依赖校验 packet / result / pair / receipt / complete，
   含凭据形状扫描、3K token 上限、SHA-256 产物绑定
+- **传输状态机（v0.2.0）**：确定性 handoff 状态机
+  `PRECHECKED → COMPOSER_VERIFIED → SEND_INTENT → SUBMITTED → RESULT_OBSERVED → RESULT_VALIDATED`，
+  `UNCERTAIN` 为终态——提交结果未确认的 run **不能** complete，也不能重发；
+  `transport.mjs handoff <transcript.json>` 校验状态轨迹，`complete` 闸门复验回执里的
+  `handoff` 字段并要求 `packet_id` 绑定
+- **Browser Use 传输（v0.2.0）**：浏览器操作迁移到 DSH 官方 Browser Use provider
+  （Playwright MCP / Chrome DevTools MCP）的 `navigate`/`snapshot`/`fill`/`click` 语义，
+  每步动作后重新观察页面；支持经 `--autoConnect` 或 `mode: attach` 复用**主 Chrome 的
+  登录态**（附着正在运行的浏览器，不复制 Cookie、不另开浏览器、不改用户 profile）；
+  内置 CDP 驱动保留为无 provider 环境的回退路径（`references/transport-browser-use.md`）
 - **本地采纳门（纪律约定，非代码机制）**：SKILL.md 要求网页输出的命令、补丁、路径、测试串
   不得直接进工具调用，每条建议须本地重开文件/符号取证后分类为 accepted / rejected / deferred；
   回执的 `complete` 闸门会要求这些字段非空并复扫产物，但**无法阻止**不遵守的模型——

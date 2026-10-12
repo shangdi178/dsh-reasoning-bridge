@@ -57,6 +57,7 @@ const usage = () => [
   '           [--composer-wait-ms N] [--send-wait-ms N] [--url-wait-ms N] [--allow-unscanned]',
   '   or: transport.mjs fetch --url <conversation-url> --out <reply.txt> [--json] [--port N]',
   '           [--screenshot <png>] [--appear-timeout-ms N] [--stream-timeout-ms N] [--stability-ms N]',
+  '   or: transport.mjs handoff <transcript.json> [--json] [--packet-id <id>]',
 ].join('\n');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -542,10 +543,54 @@ async function cmdFetch(args) {
   }
 }
 
-const COMMANDS = { status: cmdStatus, launch: cmdLaunch, open: cmdOpen, probe: cmdProbe, send: cmdSend, fetch: cmdFetch };
+/**
+ * Validate a handoff state transcript (Issue #2 Phase 2). This subcommand never
+ * touches the browser: it is the deterministic gate that turns observed states
+ * into a completion condition. See scripts/lib/handoff-state.mjs.
+ */
+async function cmdHandoff(args) {
+  const { validateTranscript, safeParseTranscript, HANDOFF_SCHEMA_VERSION } = await import('./lib/handoff-state.mjs');
+  // Positional path is not parsed by parseArgs (it has no --flag), so accept the
+  // first bare argument or --transcript <path>.
+  const transcriptPath = args.transcript ?? args._extra?.[0];
+  if (!transcriptPath) throw new CdpError('handoff requires a transcript file argument', 'usage');
+  let parsed;
+  try {
+    const { readFile: read } = await import('node:fs/promises');
+    parsed = safeParseTranscript(await read(transcriptPath, 'utf8'));
+  } catch (error) {
+    throw new CdpError(`cannot read transcript: ${error.message}`, 'handoff-unreadable');
+  }
+  if (!parsed.ok) throw new CdpError(parsed.error, 'handoff-invalid');
+  const result = validateTranscript(parsed.transcript, { packetId: args.packetId });
+  return {
+    ok: result.ok,
+    final_state: result.finalState,
+    schema_version: HANDOFF_SCHEMA_VERSION,
+    ...(result.errors.length ? { errors: result.errors } : {}),
+  };
+}
 
-const VALUE_FLAGS = ['--port', '--browser', '--profile', '--target', '--site', '--settle-ms', '--file', '--url', '--out', '--screenshot', '--composer-wait-ms', '--send-wait-ms', '--url-wait-ms', '--appear-timeout-ms', '--stream-timeout-ms', '--stability-ms'];
+const COMMANDS = { status: cmdStatus, launch: cmdLaunch, open: cmdOpen, probe: cmdProbe, send: cmdSend, fetch: cmdFetch, handoff: cmdHandoff };
+
+const VALUE_FLAGS = ['--port', '--browser', '--profile', '--target', '--site', '--settle-ms', '--file', '--url', '--out', '--screenshot', '--composer-wait-ms', '--send-wait-ms', '--url-wait-ms', '--appear-timeout-ms', '--stream-timeout-ms', '--stability-ms', '--packet-id', '--transcript'];
 const BOOLEAN_FLAGS = ['--json', '--allow-unscanned'];
+
+/**
+ * parseArgs, but positions that carry no --flag survive as `extra` instead of
+ * throwing: `handoff <transcript.json>` takes a positional path.
+ */
+function parseArgsWithExtra(argv) {
+  const extra = [];
+  const filtered = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (VALUE_FLAGS.includes(token)) { filtered.push(token, argv[index + 1]); index += 1; continue; }
+    if (BOOLEAN_FLAGS.includes(token) || token === '--json' || token === '--allow-unscanned') { filtered.push(token); continue; }
+    extra.push(token);
+  }
+  return { args: parseArgs(filtered, { flags: BOOLEAN_FLAGS, values: VALUE_FLAGS }), extra };
+}
 
 export async function main(argv = process.argv.slice(2)) {
   const [command, ...rest] = argv;
@@ -559,8 +604,8 @@ export async function main(argv = process.argv.slice(2)) {
     return 2;
   }
   try {
-    const args = parseArgs(rest, { flags: BOOLEAN_FLAGS, values: VALUE_FLAGS });
-    const result = await runner(args);
+    const { args, extra } = parseArgsWithExtra(rest);
+    const result = await runner({ ...args, _extra: extra });
     console.log(JSON.stringify(result, null, 2));
     return command === 'status' || (result && result.ok !== false) ? 0 : 1;
   } catch (error) {
