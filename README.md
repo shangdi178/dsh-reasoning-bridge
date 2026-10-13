@@ -141,6 +141,50 @@ $reasoning-bridge 审查这个架构决策，基于本地证据选定方案并�
 适合桥接的任务：根因不明确、存在多个可行方案、需要高成本技术判断。
 机械修改、简单查询和已定方案请留在本地直接完成。
 
+## 浏览器接入（quickstart）
+
+传输默认走 **DSH Browser Use provider**（Chrome DevTools MCP / Playwright MCP）；
+provider 未挂载时回退到捆绑的 CDP 驱动。三种接入方式按优先级：
+
+**A. attach 到你正在运行的 Chrome（登录态直接可用）**
+
+1. 用调试端口启动你的 Chrome（注意：Chrome M136+ **拒绝在默认 User Data 目录开调试端口**，
+   需要一个指向日常 profile 的目录别名 junction——数据原地，不拷贝任何文件）：
+
+   ```bat
+   taskkill /f /im chrome.exe          :: 完全退出 Chrome（会丢未保存表单）
+   mklink /J C:\Users\<你>\chrome-debug-link "%LOCALAPPDATA%\Google\Chrome\User Data"
+   "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir=C:\Users\<你>\chrome-debug-link
+   ```
+
+2. profile 挂载 provider（两行加进 profile 的 cordis.patch.yml）：
+
+   ```yaml
+   - insert:
+       - id: dsh-browser-use
+         name: '@deepseek-ai/dsh-browser-use'
+       - id: dsh-experimental-browser-use-chrome-devtools-mcp
+         name: '@deepseek-ai/dsh-experimental-browser-use-chrome-devtools-mcp'
+         config:
+           mode: attach
+           endpoint: http://127.0.0.1:9222
+   ```
+
+3. 重启 dsh。此后技能用 `snapshot`/`fill`/`click` 操作你的真实标签页，ChatGPT 登录态直接可用。
+
+   ⚠️ **风险**：9222 开着时本机任何进程都能读这个浏览器的会话。只在交接时用调试端口启动，平时正常启动 Chrome。
+
+**B. 专用 profile 登录一次（无需 provider，安全边界最干净）**
+
+`transport.mjs launch` 弹出专用窗口（不碰你的日常 profile），在窗口里登录一次目标站点，
+之后长期复用。**不会弹你日常的 Chrome**——这是刻意的：复用日常 profile 需要拷贝 Cookie（纪律禁止），
+给日常 Chrome 开调试端口有上述攻击面。
+
+**C. 无浏览器验证**
+
+`npm test` 里含一个本地假聊天页面 E2E（`tests/fixtures/fake-chat.html`），
+在 9222 有调试 Chrome 时走完整交接（send → fetch → 状态机），无浏览器时自动跳过。
+
 ## 首次运行
 
 用户不需要单独 setup。技能工作流依次执行：

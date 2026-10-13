@@ -5,8 +5,8 @@
 // Zero dependencies. Exit 0 = valid, 1 = errors, 2 = usage.
 
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { lstat, readFile } from 'node:fs/promises';
+import { resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TARGET_IDS } from './targets-table.mjs';
 import { STATES, validateTranscript } from './lib/handoff-state.mjs';
@@ -458,11 +458,26 @@ export function receiptCompletionErrors(receipt) {
 
 export async function verifyReceiptArtifacts(receipt, baseDirectory) {
   const errors = [];
+  // Artifact paths are attacker-controlled data (a malicious web reply or a
+  // tampered receipt). Contain them inside baseDirectory: resolve each path and
+  // refuse anything that escapes, plus symlink/device-loop paranoia via lstat.
+  const base = resolve(baseDirectory ?? process.cwd());
   for (const field of ['packet', 'result', 'browser_evidence']) {
     const artifact = receipt.artifacts?.[field];
     if (!artifact?.path || !artifact?.sha256) continue;
+    const resolved = resolve(base, artifact.path);
+    if (resolved !== base && !resolved.startsWith(base + sep)) {
+      errors.push(`${field} artifact path escapes the run directory: ${artifact.path}`);
+      continue;
+    }
+
     try {
-      const content = await readFile(resolve(baseDirectory, artifact.path), 'utf8');
+      const info = await lstat(resolved);
+      if (!info.isFile()) {
+        errors.push(`${field} artifact is not a regular file: ${artifact.path}`);
+        continue;
+      }
+      const content = await readFile(resolved, 'utf8');
       const actual = sha256Text(content);
       if (actual !== artifact.sha256) {
         errors.push(`${field} sha256 mismatch: expected ${artifact.sha256}, actual ${actual}`);

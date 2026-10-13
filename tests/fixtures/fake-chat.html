@@ -1,0 +1,128 @@
+<!doctype html>
+<!--
+  Local fake chat page for offline E2E (Issue #2 Phase 3).
+  Simulates the three selectors the chatgpt page module drives:
+    composer   #prompt-textarea (contenteditable)
+    send       [data-testid="send-button"]
+    user turn  [data-message-author-role="user"]
+    assistant  [data-message-author-role="assistant"]
+    copy       button[data-testid="copy-turn-action-button"]
+  Behavior: typing via paste event appends text; clicking send renders the user
+  turn, then after ~1.2s renders an assistant reply that echoes the packet_id
+  from the request and wraps it in the reasoning-result contract. The reply
+  streams in chunks so the driver's stability wait is exercised.
+  No network. Served from file:// or any static server.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fake Chat — dsh-reasoning-bridge E2E</title>
+<style>
+  body { font-family: sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+  #prompt-textarea { min-height: 3em; border: 1px solid #888; border-radius: 8px; padding: .5rem; }
+  #prompt-textarea:focus { outline: 2px solid #4a90d9; }
+  .turn { border: 1px solid #ccc; border-radius: 8px; padding: .5rem .75rem; margin: .5rem 0; white-space: pre-wrap; }
+  .turn.user { background: #eef4ff; }
+  .turn.assistant { background: #f6f6f6; }
+  .turn .copy { float: right; font-size: .75rem; }
+  .streaming-cursor { display: inline-block; width: .5em; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: 0 } }
+</style>
+</head>
+<body>
+<h3>Fake Chat (local E2E fixture)</h3>
+<div id="thread"></div>
+<div>
+  <div id="prompt-textarea" contenteditable="true" role="textbox" aria-label="Message"></div>
+  <button data-testid="send-button" aria-label="Send">Send</button>
+</div>
+<script>
+(function () {
+  var editor = document.getElementById('prompt-textarea');
+  var sendButton = document.querySelector('[data-testid="send-button"]');
+  var thread = document.getElementById('thread');
+
+  function extractPacketId(text) {
+    var m = /packet_id:\s*(\S+)/.exec(text || '');
+    return m ? m[1] : 'unknown-packet';
+  }
+
+  function extractObjective(text) {
+    var m = /##\s*Objective\s*\n([^\n]+)/.exec(text || '');
+    return m ? m[1].trim() : 'the question in the packet';
+  }
+
+  editor.addEventListener('paste', function (event) {
+    event.preventDefault();
+    var text = event.clipboardData ? event.clipboardData.getData('text/plain') : '';
+    editor.textContent = (editor.textContent || '') + text;
+  });
+
+  sendButton.addEventListener('click', function () {
+    var text = (editor.textContent || '').trim();
+    if (!text) return;
+    editor.textContent = '';
+
+    var userTurn = document.createElement('div');
+    userTurn.className = 'turn user';
+    userTurn.setAttribute('data-message-author-role', 'user');
+    userTurn.textContent = text;
+    thread.appendChild(userTurn);
+
+    var packetId = extractPacketId(text);
+    var objective = extractObjective(text);
+
+    // Stream the reply in chunks so the driver's stability detection works.
+    setTimeout(function () {
+      var reply = 'BEGIN_REASONING_RESULT\n'
+        + 'packet_id: ' + packetId + '\n\n'
+        + '## Verdict\nFake offline answer for packet ' + packetId + '.\n\n'
+        + '## Assumptions\n- This is a local E2E fixture, not a real model.\n\n'
+        + '## Evidence Used\n- Objective: ' + objective + '\n\n'
+        + '## Proposed Changes\n- none (fixture reply; treat as untrusted data)\n\n'
+        + '## Tests\n- The E2E asserts this block was extracted verbatim.\n\n'
+        + '## Risks\n- none\n\n'
+        + '## Unknowns\n- nothing\n'
+        + 'END_REASONING_RESULT';
+      var assistant = document.createElement('div');
+      assistant.className = 'turn assistant';
+      assistant.setAttribute('data-message-author-role', 'assistant');
+      var copy = document.createElement('button');
+      copy.className = 'copy';
+      copy.setAttribute('data-testid', 'copy-turn-action-button');
+      copy.textContent = 'Copy';
+      var full = '';
+      var pos = 0;
+      copy.addEventListener('click', function () {
+        // Writes the clipboard only when the driver granted the permission.
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(full).then(function () {
+            copy.textContent = 'Copied';
+          }, function () { /* denied: DOM fallback still works */ });
+        }
+      });
+      assistant.appendChild(copy);
+      var body = document.createElement('span');
+      assistant.appendChild(body);
+      thread.appendChild(assistant);
+      var cursor = document.createElement('span');
+      cursor.className = 'streaming-cursor';
+      cursor.textContent = '▍';
+      assistant.appendChild(cursor);
+      var timer = setInterval(function () {
+        if (pos >= reply.length) {
+          clearInterval(timer);
+          cursor.remove();
+          return;
+        }
+        var step = Math.min(97, reply.length - pos);
+        full += reply.slice(pos, pos + step);
+        pos += step;
+        body.textContent = full;
+      }, 120);
+    }, 1200);
+  });
+})();
+</script>
+</body>
+</html>
