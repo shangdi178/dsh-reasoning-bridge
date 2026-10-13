@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.5.0 — 2026-10-11
+
+Browser Use transport, a deterministic handoff state machine, and honest E2E
+boundaries. This is the milestone the v0.2.0 upgrade brief named (Issue #2,
+Phases 0–2); it ships as 0.5.0 because 0.4.0 already exists on main and version
+numbers do not go backwards. The transport migrates from legacy `browser_*` tool
+assumptions and a synthetic-paste input path to the official DSH Browser Use
+provider semantics.
+
+- **Browser Use transport** (`references/transport-browser-use.md`) — navigate /
+  snapshot / fill / click / read with a re-observe after every action. Main-Chrome
+  login reuse without touching the user's profile: upstream `--autoConnect`
+  (attaches to the running Chrome after one Allow dialog) or provider
+  `mode: attach` + `endpoint`. The bundled CDP driver stays as a documented
+  fallback, and `transport.mjs handoff` validates transcripts for either path.
+- **Deterministic handoff state machine** — `PRECHECKED → COMPOSER_VERIFIED →
+  SEND_INTENT → SUBMITTED → RESULT_OBSERVED → RESULT_VALIDATED`, with `UNCERTAIN`
+  terminal. Per-state required evidence; RESULT states must bind the run's
+  `packet_id`. `transport.mjs handoff <transcript.json>` validates a transcript,
+  and the receipt `complete` gate re-validates an optional `handoff` field: a run
+  whose submit was never confirmed cannot be marked complete. Legacy receipts
+  without the field stay valid.
+- **Human-confirmed send** — `SEND_INTENT` records the explicit user go-ahead;
+  no automatic submission, exactly one send attempt, no retry on uncertainty.
+- **Two live-flow bugs fixed** — the send `click()` false negative (DOM click
+  returns `undefined`), and stale-answer extraction (fetch now re-resolves the
+  newest assistant turn after the stream settles and never falls back to the
+  first historical Copy button).
+- **New expression guard** — page-phase bodies are embedded in a template
+  literal, so a stray backtick inside a comment truncated every later phase and
+  silently swallowed the `send-uncertain` path; each expression is now executed
+  in tests and must evaluate to a promise.
+- **Phase 0 verified** — clean-profile install mounts the bundle layer
+  (`dsh plugin --profile <p> add .`, then `--dump-config` shows the plugin row)
+  and Doctor reports READY.
+
+**Honest boundary:** verified so far are install/skill-load smoke, consent gate
+enforcement, the state machine, the `complete` gate integration, and all unit
+tests on real files. A real ChatGPT round-trip through a mounted Browser Use
+provider is **not yet verified** — this deployment has no provider mounted, and
+per the roadmap, mock-green is not browser-green. See the PR description for the
+blockers and the opt-in manual smoke procedure.
+
+- 76 node:test cases (was 66)
+
 ## 0.4.0 — 2026-10-10
 
 Audit release. A README-vs-implementation review plus two independent audits

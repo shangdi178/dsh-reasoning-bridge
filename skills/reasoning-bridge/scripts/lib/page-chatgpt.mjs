@@ -118,6 +118,9 @@ export function buildSendExpression({ text, composerWaitMs = 12000, sendWaitMs =
   }
   const send = await waitFor(__rb.S.send, __rb.sendWaitMs);
   if (!send) return fail('send-control-not-found');
+  // DOM click() returns undefined on success, so a fallback on the return value
+  // would report a false negative; treat a non-throwing click as delivered and
+  // let the user-turn wait decide the outcome.
   send.click();
   const deadline = Date.now() + __rb.urlWaitMs;
   while (Date.now() < deadline) {
@@ -170,8 +173,12 @@ export function buildFetchExpression({ appearTimeoutMs = 30000, streamTimeoutMs 
   const why = [];
   let text = null;
   let extraction = null;
+  // Re-resolve the newest assistant turn AFTER the stream settles: the element
+  // captured before waiting may be an earlier reply, and using it would bind the
+  // run to a stale answer. Only the turn for the just-submitted packet counts.
+  const settled = lastMatch(__rb.S.assistant) ?? message;
   const copy = (() => {
-    let scope = message;
+    let scope = settled;
     for (let level = 0; level < 4 && scope; level += 1) {
       for (const selector of __rb.S.copy) {
         const button = scope.querySelector(selector);
@@ -179,7 +186,9 @@ export function buildFetchExpression({ appearTimeoutMs = 30000, streamTimeoutMs 
       }
       scope = scope.parentElement;
     }
-    return lastMatch(__rb.S.copy);
+    // No fallback across the whole document: the first historical Copy button
+    // belongs to an earlier turn and must never be read for this run.
+    return null;
   })();
   if (copy) {
     try {
@@ -198,7 +207,7 @@ export function buildFetchExpression({ appearTimeoutMs = 30000, streamTimeoutMs 
     why.push('copy-control-not-found');
   }
   if (text === null) {
-    const visible = (message.innerText || message.textContent || '').trim();
+    const visible = (settled.innerText || settled.textContent || '').trim();
     if (visible.length >= 32) {
       text = visible;
       extraction = 'dom';

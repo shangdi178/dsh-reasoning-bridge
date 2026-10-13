@@ -23,14 +23,17 @@ const REQUIRED_FILES = [
   'references/transport.md',
   'references/transport-chatgpt.md',
   'references/transport-arena.md',
+  'references/transport-browser-use.md',
   'scripts/validate.mjs',
   'scripts/consent.mjs',
   'scripts/target.mjs',
   'scripts/targets-table.mjs',
   'scripts/transport.mjs',
   'scripts/lib/cdp.mjs',
+  'scripts/lib/handoff-state.mjs',
   'scripts/lib/page-chatgpt.mjs',
   'scripts/lib/page-arena.mjs',
+  'scripts/lib/settings-bridge.mjs',
 ].map((relative) => ({ id: `file:${relative}`, path: join(skillDir, relative) }));
 
 const EXPECTED_PACKAGE_NAME = 'dsh-reasoning-bridge';
