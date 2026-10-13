@@ -43,7 +43,25 @@ provider is **not yet verified** — this deployment has no provider mounted, an
 per the roadmap, mock-green is not browser-green. See the PR description for the
 blockers and the opt-in manual smoke procedure.
 
-- 76 node:test cases (was 66)
+- **Artifact path containment (Phase 2)** — `verifyReceiptArtifacts` resolved
+  receipt-supplied paths with no containment check, so a tampered receipt could
+  make `complete` read arbitrary files. Paths are now resolved and refused when
+  they escape the run directory; `lstat` refuses symlinks and directories; the
+  read cap stays. Tested: traversal, absolute-outside, symlink (skipped on
+  Windows where creating one needs developer mode), directory-as-file.
+- **Version migration / back-compat (Phase 2)** — consent states with a past
+  (0) or future (3) `schema_version` are refused (never silently honored);
+  current v1 round-trips; old receipts parse for inspection but the completion
+  gate still demands schema 2.
+- **Offline fake-chat E2E (Phase 3)** — `tests/fixtures/fake-chat.html` mimics
+  the real site's selector contract and streams a contract-valid reply; the E2E
+  drives the bundled CDP driver through send → fetch → result/pair validation →
+  state transcript, entirely on localhost. Skips (not fails) without a debug
+  browser — mock-green never impersonates browser-green.
+- README quickstart (browser attach vs dedicated profile, with the Chrome
+  M136+ junction caveat) and a DESIGN section recording the verified host
+  facts behind the transport design.
+- 86 node:test cases (was 76; 85 run + 1 environment-skipped)
 
 ## 0.4.0 — 2026-10-10
 

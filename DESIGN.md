@@ -106,3 +106,28 @@ Packet、Result、采纳门、回执契约不需要任何改动。
 教训记在这里：**任何「我们把 X 关在门外」的表述，都要能指向一行拒绝执行的代码**，
 否则就写成纪律，并说明它依赖遵守。
 
+## 6. 0.5.0 — DSH 官方接口事实（Browser Use 传输的设计依据）
+
+按 Issue #2 的要求把传输迁到官方接口，先核实了这些**宿主事实**（截至
+dsh 0.2.0-rc.2，provider 包 0.1.6-alpha.1）：
+
+- **Browser Use 是 registration-only 服务**：`ctx.browserUse.register(name)`
+  占唯一槽位；provider 插件自持工具与浏览器会话，core 不加任何模型可见内容。
+- **工具以 MCP 名义暴露**：`mcp__chrome-devtools-mcp__<tool>`，catalog/资源/服务端
+  指令随 Session 走；会话独占浏览器，外部 attach 的浏览器保持外部所有。
+- **provider 0.1.6-alpha.1 的 attach 只支持 `--browser-url`/`--ws-endpoint`**，
+  **没有透传上游 chrome-devtools-mcp 1.9 的 `--autoConnect`**。autoConnect 的
+  真实机制是读 `<userDataDir>/DevToolsActivePort` 文件——该文件仅当 Chrome 以
+  调试模式启动过才存在。
+- **Chrome M136+ 拒绝在默认 User Data 目录开调试端口**（安全策略，实测 155.0.8059.40
+  确认：进程在跑、端口不开、DevToolsActivePort 不生成）。社区通行绕法是指向
+  日常 profile 的 junction 目录别名——数据原地、不拷贝文件，但这是用户自己
+  要权衡的攻击面（端口开着=本机进程可读会话）。
+- **本插件的落地选择**：技能首选 provider 工具语义（snapshot/fill/click，每步
+  重观察）；CDP 驱动保留为无 provider 回退；attach 接入方式写入 README quickstart
+  （含 M136+ 的 junction 说明），**不为绕过浏览器安全策略写任何自动代码**。
+- **本地假聊天页 E2E**：`tests/fixtures/fake-chat.html` 用与真实站点相同的选择器
+  契约（`#prompt-textarea`/`data-testid="send-button"`/`data-message-author-role`）
+  离线跑完整交接；无调试浏览器时跳过而不是失败——**mock 绿不冒充浏览器绿**，
+  真实站点 E2E 仍是独立的 opt-in 手工步骤。
+
